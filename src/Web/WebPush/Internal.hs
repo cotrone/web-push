@@ -40,7 +40,7 @@ type VAPIDKeys = ECDSA.KeyPair
 -- Not using jose library. Check the below link for reason:
 -- https://github.com/sarthakbagaria/web-push/pull/1#issuecomment-471254455
 webPushJWT :: MonadIO m => VAPIDKeys -> Request -> T.Text -> m LB.ByteString
-webPushJWT vapidKeys initReq senderEmail = do
+webPushJWT vapidKeys initReq _senderEmail = do
     -- JWT base 64 encoding is without padding
     time <- liftIO getCurrentTime
     let messageForJWTSignature =
@@ -48,7 +48,7 @@ webPushJWT vapidKeys initReq senderEmail = do
                 encodedJWTPayload = b64UrlNoPadding . LB.toStrict . A.encode . A.object $
                     [ "aud" .= (TE.decodeUtf8With TE.lenientDecode $ proto <> (host initReq))
                     , "exp" .= (formatTime defaultTimeLocale "%s" $ addUTCTime 3000 time) -- jwt expiration time
-                    , "sub" .= ("mailto: " <> senderEmail)
+                    -- , "sub" .= ("mailto: " <> senderEmail)
                     ]
 
                 encodedJWTHeader = b64UrlNoPadding . LB.toStrict . A.encode . A.object $
