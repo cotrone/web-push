@@ -3,7 +3,6 @@
 
 module Web.WebPush.Internal where
 
-import           Control.Monad
 import           Control.Monad.IO.Class     (MonadIO, liftIO)
 import           Crypto.Cipher.AES          (AES128)
 import qualified Crypto.Cipher.Types        as Cipher
@@ -17,7 +16,6 @@ import           Data.Aeson                 ((.=))
 import qualified Data.Aeson                 as A
 import           Data.Bifunctor
 import qualified Data.Binary                as Binary
-import qualified Data.Binary.Get            as Get
 import qualified Data.Bits                  as Bits
 import qualified Data.ByteArray             as ByteArray
 import           Data.ByteString            (ByteString)
@@ -27,6 +25,10 @@ import qualified Data.ByteString.Lazy       as LB
 import           Data.Text                  (Text)
 import           Data.Word                  (Word16, Word64, Word8)
 import           GHC.Int                    (Int64)
+import qualified Crypto.ECC
+import Data.Data
+import qualified Crypto.PubKey.ECC.Types as ECCTypes
+import qualified Crypto.PubKey.ECC.P256 as P256
 
 type VAPIDKeys = ECDSA.KeyPair
 
@@ -90,7 +92,8 @@ data WebPushEncryptionOutput = EncryptionOutput {
 
 data PushEncryptError =
     PushEncryptCryptoError CryptoError
-  | PushEncryptParseKeyError String
+  | PushEncryptParseKeyError CryptoError
+  | PushEncodeApplicationPublicKeyError String
   deriving (Eq, Show)
 
 -- | payload encryption
@@ -98,8 +101,9 @@ data PushEncryptError =
 webPushEncrypt :: WebPushEncryptionInput -> Either PushEncryptError WebPushEncryptionOutput
 webPushEncrypt EncryptionInput {..} = do
   userAgentPublicKey <- first PushEncryptParseKeyError $ ecBytesToPublicKey userAgentPublicKeyBytes
+  applicationServerPublicKeyBytes <- first PushEncodeApplicationPublicKeyError $ ecPublicKeyToBytes $ ECDH.calculatePublic curveP256 applicationServerPrivateKey
   let 
-    sharedECDHSecret = ECDH.getShared (ECC.getCurveByName ECC.SEC_p256r1) applicationServerPrivateKey userAgentPublicKey
+    sharedECDHSecret = ECDH.getShared curveP256 applicationServerPrivateKey userAgentPublicKey
 
     -- HMAC key derivation (HKDF, here expanded into HMAC steps as specified in web push encryption spec)
     pseudoRandomKeyCombine = HMAC.hmac authenticationSecret sharedECDHSecret :: HMAC.HMAC SHA256
@@ -142,7 +146,8 @@ webPushEncrypt EncryptionInput {..} = do
   pure $ EncryptionOutput {..}
   where
     handleCryptoError = first PushEncryptCryptoError . eitherCryptoError
-    applicationServerPublicKeyBytes = LB.toStrict $ ecPublicKeyToBytes $ ECDH.calculatePublic (ECC.getCurveByName ECC.SEC_p256r1) $ applicationServerPrivateKey
+    curveP256 = ECCTypes.getCurveByName ECCTypes.SEC_p256r1
+  
 
 
 -- Conversions among integers and bytes
@@ -153,27 +158,15 @@ webPushEncrypt EncryptionInput {..} = do
     -- DER encdoing will be shorter than 32 bytes
     -- and decoding to 4 word64 will fail because of short input
  -}
-ecPublicKeyToBytes :: ECC.Point -> LB.ByteString
--- Point0 is the point at infinity, not sure what's the encoding for that
--- TODO CHECK THIS, this is ANSI X9.62 but I can't access it without 
-ecPublicKeyToBytes ECC.PointO = "\x04" <> (Binary.encode $ int32Bytes 0) <> (Binary.encode $ int32Bytes 0)
-ecPublicKeyToBytes (ECC.Point x y) = "\x04" <> (Binary.encode $ int32Bytes x) <> (Binary.encode $ int32Bytes y)
+ecPublicKeyToBytes :: ECC.Point -> Either String ByteString
+ecPublicKeyToBytes p = Crypto.ECC.encodePoint (Proxy :: Proxy Crypto.ECC.Curve_P256R1) <$> fromECCPoint p
+  where
+    fromECCPoint ECC.PointO = Left "Invalid public key infinity point"
+    fromECCPoint (ECC.Point x y) = Right $ P256.pointFromIntegers (x,y)
 
-ecBytesToPublicKey :: ByteString -> Either String ECC.Point
-ecBytesToPublicKey bytes = do
-    runGetOrError (LB.fromStrict bytes) $ do
-      -- the first byte is should be \x04 which tells that the key is in uncompressed form
-      compressed <- Get.getWord8
-      when (compressed /= 4) $ fail "Only uncompressed keys are supported"
-      xBytes :: Bytes32 <- Binary.get
-      yBytes :: Bytes32 <- Binary.get
-      let xInteger = bytes32Int xBytes
-          yInteger = bytes32Int yBytes
-      pure $ ECC.Point xInteger yInteger
-    where
-      -- Decode with error, ignoring the offsets and unconsumed input in the result
-      runGetOrError bs g = bimap ignoreUnconsumedAndOffset ignoreUnconsumedAndOffset $ Get.runGetOrFail g bs
-      ignoreUnconsumedAndOffset (_, _, res) = res
+ecBytesToPublicKey :: ByteString -> Either CryptoError ECC.Point
+ecBytesToPublicKey = eitherCryptoError . fmap toECCPoint . Crypto.ECC.decodePoint (Proxy :: Proxy Crypto.ECC.Curve_P256R1)
+  where toECCPoint = uncurry ECC.Point . P256.pointToIntegers 
 
 -- Coordinates on Elliptic Curves are 32 bit integers
 type Bytes32 = (Word64, Word64, Word64, Word64)

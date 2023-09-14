@@ -1,0 +1,89 @@
+cabal-version:      3.0
+name:               web-push-example
+version:            0.1.0.0
+-- synopsis:
+-- description:
+license:            MIT
+license-file:       LICENSE
+author:             Kevin Cotrone
+maintainer:         kevincotrone@gmail.com
+-- copyright:
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+-- extra-source-files:
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    exposed-modules:  WebPushExample
+    -- other-modules:
+    -- other-extensions:
+    hs-source-dirs:   src
+    default-language: Haskell2010
+    build-depends:    base >= 4.7 && < 5
+                    , aeson
+                    , bytestring
+                    , containers
+                    , directory
+                    , http-api-data
+                    , http-client
+                    , http-conduit
+                    , http-media
+                    , lens
+                    , mustache
+                    , servant
+                    , servant-server
+                    , stm
+                    , text
+                    , time
+                    , transformers
+                    , warp
+                    , web-push ^>= 0.5
+
+executable web-push-example-server
+    import:           warnings
+    main-is:          Main.hs
+    -- other-modules:
+    -- other-extensions:
+    build-depends: base >= 4.7 && < 5
+                 , aeson
+                 , bytestring
+                 , containers
+                 , directory
+                 , http-api-data
+                 , http-client
+                 , http-conduit
+                 , http-media
+                 , lens
+                 , mustache
+                 , servant
+                 , servant-server
+                 , text
+                 , time
+                 , transformers
+                 , warp
+                 , web-push ^>= 0.5
+                 , web-push-example
+    hs-source-dirs:   app
+    default-language: Haskell2010
+
+test-suite web-push-example-test
+    import:           warnings
+    default-language: Haskell2010
+    -- other-modules:
+    -- other-extensions:
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Main.hs
+    build-depends:    base >= 4.7 && < 5
+                     , aeson
+                     , containers
+                     , process
+                     , stm
+                     , tasty
+                     , tasty-hunit
+                     , unordered-containers
+                     , web-push-example
+                     , webdriver-w3c >= 0.0.3 && < 0.1

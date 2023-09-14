@@ -3,10 +3,16 @@ resolver: lts-20.26
 docker:
     enable: true
 
-packages:
-- '.'
+nix:
+    enable: false
 
-extra-deps: []
+packages:
+    - '.'
+
+extra-deps:
+    - webdriver-w3c-0.0.3
+    - script-monad-0.0.3
+    - crypton-0.33
 
 flags: {}
 
