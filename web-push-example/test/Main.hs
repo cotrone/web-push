@@ -106,7 +106,8 @@ main = do
             testServer <- liftIO getTestServer
             subscribe testServer
           ]
-          -- Firefox is currently disabled because push notifications are broken in firefox running in geckodriver https://github.com/mozilla/geckodriver/issues/1687
+          -- Firefox is currently disabled because push notifications are
+          -- broken in firefox running in geckodriver https://github.com/mozilla/geckodriver/issues/1687
           -- , testGroup "Firefox" [
           --   withResource initTestServer killTestServer $ \getTestServer -> testFirefox firefoxBin "Subscribe" $ do
           --     testServer <- liftIO getTestServer
