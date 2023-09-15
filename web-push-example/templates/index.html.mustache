@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
+    <script src="http://localhost:3000/index.js"></script>
+    <script>
+      function sendTestNotification() {
+        sendPushNotification($('#notificationText').val());
+      }
+      </script>
+  </head>
+  <body>
+
+    <h1> Web Push Example </h1>
+    <button onclick="newPushNotificationInitialize()">
+      Subscribe to push notifications
+    </button>
+    <p>Enter text to send in notification.</p>
+
+    <input id="notificationText" type="text" maxlength="100">
+    <button onclick="sendTestNotification()">
+      Send
+    </button>
+
+  </body>
+</html>

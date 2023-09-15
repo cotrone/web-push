@@ -3,10 +3,31 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/lock_files
 
-packages: []
+packages:
+- completed:
+    hackage: webdriver-w3c-0.0.3@sha256:7bfdd051a934edebfdbc0c7a205e288e5ab85a81f3bed59b0cc5247c473eb191,4439
+    pantry-tree:
+      size: 2217
+      sha256: 912dfaf3c6821659d22859b23a5e633fd0fcafb1190e4f4942543ae85168c693
+  original:
+    hackage: webdriver-w3c-0.0.3
+- completed:
+    hackage: script-monad-0.0.3@sha256:ba3bad28d6f6400fe492101300dad63989afc813cc6c8dc23832170275951ef0,2218
+    pantry-tree:
+      size: 1200
+      sha256: 165db39bdeb0ae75d45ae7eef354f5d42858c2e465fd69d58ff605096a811622
+  original:
+    hackage: script-monad-0.0.3
+- completed:
+    hackage: crypton-0.33@sha256:5e92f29b9b7104d91fcdda1dec9400c9ad1f1791c231cc41ceebd783fb517dee,18202
+    pantry-tree:
+      size: 23148
+      sha256: 38809499d7f9775ef45cd29ab5c3dc9b283a813f34c1cdc56681b24f8cf8bb4f
+  original:
+    hackage: crypton-0.33
 snapshots:
 - completed:
-    size: 531674
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/16/2.yaml
-    sha256: 4b08fb9338ca297de7ade8318f4be1216f14dff8c0426c001fb7886ee88cb84a
-  original: lts-16.2
+    size: 650475
+    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/20/26.yaml
+    sha256: 5a59b2a405b3aba3c00188453be172b85893cab8ebc352b1ef58b0eae5d248a2
+  original: lts-20.26
