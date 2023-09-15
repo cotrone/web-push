@@ -39,7 +39,7 @@ firefoxConfig :: WebDriverConfig IO
 firefoxConfig = defaultWebDriverConfig {
     _environment = defaultWebDriverEnvironment {
       _logOptions = defaultWebDriverLogOptions {
-        _logSilent = True
+        _logSilent = False
       }
     } 
   }
@@ -59,7 +59,7 @@ chromeConfig :: WebDriverConfig IO
 chromeConfig = defaultWebDriverConfig {
     _environment = defaultWebDriverEnvironment {
       _logOptions = defaultWebDriverLogOptions {
-        _logSilent = True
+        _logSilent = False
       },
       _env = defaultWDEnv {
         _remotePort = 9515

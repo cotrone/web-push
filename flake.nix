@@ -51,11 +51,11 @@
       web-push-example-tests = pkgs.writeScriptBin "web-push-example-tests" ''
         trap "kill 0" EXIT
         echo "Starting geckodriver"
-        ${pkgs.geckodriver}/bin/geckodriver --log error 2>&1 > /dev/null &
+        ${pkgs.geckodriver}/bin/geckodriver &
         GECKODRIVER_PID=$!
 
         echo "Starting chromedriver"
-        ${pkgs.chromedriver}/bin/chromedriver --log-level=SEVERE 2>&1 > /dev/null &
+        ${pkgs.chromedriver}/bin/chromedriver &
         CHROMEDRIVER_PID=$!
 
         echo "Wait for geckodriver to start"
@@ -74,8 +74,6 @@
           echo "Failed to start chromedriver"
           exit $CHROMEDRIVER_EXIT_CODE
         fi
-        grep MemTotal /proc/meminfo
-        sleep 15
 
         echo "Starting web-push-example-tests"
         ${flake.packages."web-push-example:test:web-push-example-test"}/bin/web-push-example-test
