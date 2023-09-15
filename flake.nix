@@ -58,8 +58,8 @@
       # };
       web-push-example-test = pkgs.writeScriptBin "web-push-example-test" ''
         trap "kill 0" EXIT
-        CHROME_BINARY=${pkgs.google-chrome}/bin/google-chrome
-        FIREFOX_BINARY=${pkgs.firefox}/bin/firefox
+        export CHROME_BINARY=${pkgs.google-chrome}/bin/google-chrome-stable
+        export FIREFOX_BINARY=${pkgs.firefox}/bin/firefox
 
         echo "Starting geckodriver"
         ${pkgs.geckodriver}/bin/geckodriver &

@@ -98,6 +98,7 @@ main :: IO ()
 main = do
   chromeBin <- lookupEnv "CHROME_BINARY"
   firefoxBin <- lookupEnv "FIREFOX_BINARY"
+  print (chromeBin, firefoxBin)
   defaultMain $ 
     localOption (mkTimeout 20000000) $ testGroup "Browsers" [
         testGroup "Chrome" [
@@ -143,18 +144,6 @@ data RunningDriver = RunningDriver {
   runningDriverConfig :: (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle)
 , runningDriverName :: String
 }
-
-initDriver :: String -> IO RunningDriver
-initDriver name = do
-  p <- createProcess $ proc name []
-  pure $ RunningDriver p name
-
-killDriver :: RunningDriver -> IO ()
-killDriver driver = do
-  putStrLn $ "Terminating driver " <> runningDriverName driver
-  let (_, _, _, p) = runningDriverConfig driver
-  interruptProcessGroupOf p
-  putStrLn $ "Terminated driver " <> runningDriverName driver
 
 subscribe :: TestServer -> WebDriverT IO ()
 subscribe testServer = do
