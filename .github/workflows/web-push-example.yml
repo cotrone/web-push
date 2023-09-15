@@ -1,4 +1,4 @@
-name: "Test"
+name: "Browser tests on web-push-example"
 on:
   pull_request:
   push:

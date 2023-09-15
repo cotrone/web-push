@@ -1,4 +1,7 @@
-# web-push [![Hackage](https://img.shields.io/hackage/v/web-push.svg)](https://hackage.haskell.org/package/web-push)
+# web-push
+
+[![Hackage](https://img.shields.io/hackage/v/web-push.svg)](https://hackage.haskell.org/package/web-push)
+![Example Browser Tests](https://github.com/github/docs/actions/workflows/web-push-example.yml/badge.svg)
 
 Helper functions to send messages using Web Push protocol.
 
