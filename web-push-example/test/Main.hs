@@ -11,21 +11,23 @@ import           Control.Monad.IO.Class
 import           Data.Aeson
 import qualified Data.HashMap.Strict    as HashMap
 import qualified Data.Set               as Set
+import qualified Data.Text              as Text
 import           System.IO
 import           System.Process
 import           Test.Tasty
 import qualified Test.Tasty.HUnit       as HUnit
 import           Web.Api.WebDriver
+import           System.Environment
 import           System.Posix.Signals (signalProcess, sigINT)
 
 import           WebPushExample
 
 
-firefoxCapabilities :: Capabilities
-firefoxCapabilities =
+firefoxCapabilities :: Maybe String -> Capabilities
+firefoxCapabilities binLocation =
   defaultFirefoxCapabilities {
     _firefoxOptions = Just $ FirefoxOptions {
-        _firefoxBinary = Nothing
+        _firefoxBinary = binLocation
       , _firefoxArgs = Just ["--headless"]
       , _firefoxLog = Nothing
       , _firefoxPrefs = Just $ HashMap.fromList [
@@ -44,11 +46,12 @@ firefoxConfig = defaultWebDriverConfig {
     } 
   }
 
-chromeCapabilities :: Capabilities
-chromeCapabilities =
+chromeCapabilities :: Maybe String -> Capabilities
+chromeCapabilities binLocation =
   defaultChromeCapabilities {
     _chromeOptions = Just $ defaultChromeOptions {
-      _chromeArgs = Just ["--headless=new"]
+      _chromeBinary = binLocation
+      , _chromeArgs = Just ["--headless=new"]
       , _chromePrefs = Just $ HashMap.fromList [
         ("profile.default_content_setting_values.notifications", Number 1) -- 1 is allow, 2 is block, 0 is default 
       ]
@@ -85,23 +88,25 @@ testWebdriver config capabilities name action =
   where
     debug = debugWebDriverT config . runIsolated capabilities
 
-testChrome :: String -> WebDriverT IO () -> TestTree
-testChrome = testWebdriver chromeConfig chromeCapabilities
+testChrome :: Maybe String -> String -> WebDriverT IO () -> TestTree
+testChrome binLocation = testWebdriver chromeConfig (chromeCapabilities binLocation)
 
-testFirefox :: String -> WebDriverT IO () -> TestTree
-testFirefox = testWebdriver firefoxConfig firefoxCapabilities
+testFirefox :: Maybe String -> String -> WebDriverT IO () -> TestTree
+testFirefox binLocation = testWebdriver firefoxConfig (firefoxCapabilities binLocation)
 
 main :: IO ()
-main =
+main = do
+  chromeBin <- lookupEnv "CHROME_BINARY"
+  firefoxBin <- lookupEnv "FIREFOX_BINARY"
   defaultMain $ 
     localOption (mkTimeout 20000000) $ testGroup "Browsers" [
         testGroup "Chrome" [
-          withResource initTestServer killTestServer $ \getTestServer -> testChrome "Subscribe" $ do
+          withResource initTestServer killTestServer $ \getTestServer -> testChrome chromeBin "Subscribe" $ do
             testServer <- liftIO getTestServer
             subscribe testServer
           ]
           , testGroup "Firefox" [
-            withResource initTestServer killTestServer $ \getTestServer -> testFirefox "Subscribe" $ do
+            withResource initTestServer killTestServer $ \getTestServer -> testFirefox firefoxBin "Subscribe" $ do
               testServer <- liftIO getTestServer
               subscribe testServer
           ]

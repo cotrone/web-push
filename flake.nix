@@ -48,8 +48,19 @@
                                   ];
           };
       })];
-      web-push-example-tests = pkgs.writeScriptBin "web-push-example-tests" ''
+      # web-push-example-tests = pkgs.symlinkJoin {
+      #   name = "web-push-example-tests";
+      #   paths = [ web-push-example-tests-script ];
+      #   buildInputs = [ pkgs.makeWrapper ];
+      #   postBuild = ''
+      #     wrapProgram $out/bin/web-push-example-tests-script --prefix PATH : ${pkgs.nodejs}/bin
+      #   ''
+      # };
+      web-push-example-test = pkgs.writeScriptBin "web-push-example-test" ''
         trap "kill 0" EXIT
+        CHROME_BINARY=${pkgs.google-chrome}/bin/google-chrome
+        FIREFOX_BINARY=${pkgs.firefox}/bin/firefox
+
         echo "Starting geckodriver"
         ${pkgs.geckodriver}/bin/geckodriver &
         GECKODRIVER_PID=$!
@@ -60,13 +71,13 @@
 
         echo "Wait for geckodriver to start"
         timeout 30 sh -c 'until ${pkgs.netcat}/bin/nc -z $0 $1; do sleep 1; done' localhost 4444
+
         GECKODRIVER_EXIT_CODE=$?
         if [ $GECKODRIVER_EXIT_CODE -ne 0 ]; then
           echo "Failed to start geckodriver"
           exit $GECKODRIVER_EXIT_CODE
         fi
 
-        echo "Wait for chromedriver to start"
         timeout 30 sh -c 'until ${pkgs.netcat}/bin/nc -z $0 $1; do sleep 1; done' localhost 9515
         # Exit if either of the timeout fails
         CHROMEDRIVER_EXIT_CODE=$?
@@ -92,7 +103,7 @@
     in flake // {
       packages = flake.packages // {
         web-push-testing = web-push-testing;
-        web-push-example-test = web-push-example-tests;
+        web-push-example-test = web-push-example-test;
       };
     });
 }

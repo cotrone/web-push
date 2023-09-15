@@ -72,6 +72,7 @@ test-suite web-push-example-test
                      , stm
                      , tasty
                      , tasty-hunit
+                     , text
                      , unix
                      , unordered-containers
                      , web-push-example
