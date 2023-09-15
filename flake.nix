@@ -48,16 +48,7 @@
                                   ];
           };
       })];
-      # web-push-example-tests = pkgs.symlinkJoin {
-      #   name = "web-push-example-tests";
-      #   paths = [ web-push-example-tests-script ];
-      #   buildInputs = [ pkgs.makeWrapper ];
-      #   postBuild = ''
-      #     wrapProgram $out/bin/web-push-example-tests-script --prefix PATH : ${pkgs.nodejs}/bin
-      #   ''
-      # };
       web-push-example-test = pkgs.writeScriptBin "web-push-example-test" ''
-        trap "kill 0" EXIT
         export CHROME_BINARY=${pkgs.google-chrome}/bin/google-chrome-stable
         export FIREFOX_BINARY=${pkgs.firefox}/bin/firefox
 
@@ -68,6 +59,15 @@
         echo "Starting chromedriver"
         ${pkgs.chromedriver}/bin/chromedriver --log-level=SEVERE 2>&1 > /dev/null &
         CHROMEDRIVER_PID=$!
+
+        cleanup() {
+          code=$?
+          echo "Killing chromedriver and geckodriver and returning $code"
+          kill $CHROMEDRIVER_PID
+          kill $GECKODRIVER_PID
+          exit $code
+        }
+        trap "cleanup" EXIT
 
         echo "Wait for geckodriver to start"
         timeout 30 sh -c 'until ${pkgs.netcat}/bin/nc -z $0 $1; do sleep 1; done' localhost 4444
@@ -89,9 +89,8 @@
         echo "Starting web-push-example-tests"
         ${flake.packages."web-push-example:test:web-push-example-test"}/bin/web-push-example-test
         EXIT_CODE=$?
-
+        echo "web-push-example-tests exited with code $EXIT_CODE"
         exit $EXIT_CODE
-
       '';
       pkgs = import nixpkgs {
         inherit system overlays;
