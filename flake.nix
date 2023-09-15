@@ -62,11 +62,11 @@
         export FIREFOX_BINARY=${pkgs.firefox}/bin/firefox
 
         echo "Starting geckodriver"
-        ${pkgs.geckodriver}/bin/geckodriver &
+        ${pkgs.geckodriver}/bin/geckodriver --log error 2>&1 > /dev/null &
         GECKODRIVER_PID=$!
 
         echo "Starting chromedriver"
-        ${pkgs.chromedriver}/bin/chromedriver &
+        ${pkgs.chromedriver}/bin/chromedriver --log-level=SEVERE 2>&1 > /dev/null &
         CHROMEDRIVER_PID=$!
 
         echo "Wait for geckodriver to start"
