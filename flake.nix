@@ -75,6 +75,8 @@
           exit $CHROMEDRIVER_EXIT_CODE
         fi
 
+        sleep 15
+
         echo "Starting web-push-example-tests"
         ${flake.packages."web-push-example:test:web-push-example-test"}/bin/web-push-example-test
         EXIT_CODE=$?
