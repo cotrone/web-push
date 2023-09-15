@@ -1,20 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 
-import Control.Concurrent.STM
-import Test.Tasty
-import Control.Monad
-import qualified Data.HashMap.Strict as HashMap
-import Data.Aeson
-import Control.Monad.IO.Class
-import qualified Test.Tasty.HUnit as HUnit
-import qualified Data.Set as Set
-import Web.Api.WebDriver
-import System.Process
-import Control.Concurrent
-import System.IO
+import           Control.Concurrent
+import           Control.Concurrent.STM
+import           Control.Exception
+import           Control.Exception.Safe
+import           Control.Monad
+import           Control.Monad.IO.Class
+import           Data.Aeson
+import qualified Data.HashMap.Strict    as HashMap
+import qualified Data.Set               as Set
+import           System.IO
+import           System.Process
+import           Test.Tasty
+import qualified Test.Tasty.HUnit       as HUnit
+import           Web.Api.WebDriver
+import           System.Posix.Signals (signalProcess, sigINT)
 
-import WebPushExample
+import           WebPushExample
 
 
 firefoxCapabilities :: Capabilities
@@ -22,7 +26,7 @@ firefoxCapabilities =
   defaultFirefoxCapabilities {
     _firefoxOptions = Just $ FirefoxOptions {
         _firefoxBinary = Nothing
-      , _firefoxArgs = Just []
+      , _firefoxArgs = Just ["--headless"]
       , _firefoxLog = Nothing
       , _firefoxPrefs = Just $ HashMap.fromList [
           ("permissions.default.desktop-notification", Number 1)
@@ -31,11 +35,21 @@ firefoxCapabilities =
     }
   }
 
+firefoxConfig :: WebDriverConfig IO
+firefoxConfig = defaultWebDriverConfig {
+    _environment = defaultWebDriverEnvironment {
+      _logOptions = defaultWebDriverLogOptions {
+        _logSilent = True
+      }
+    } 
+  }
+
 chromeCapabilities :: Capabilities
 chromeCapabilities =
   defaultChromeCapabilities {
     _chromeOptions = Just $ defaultChromeOptions {
-      _chromePrefs = Just $ HashMap.fromList [
+      _chromeArgs = Just ["--headless=new"]
+      , _chromePrefs = Just $ HashMap.fromList [
         ("profile.default_content_setting_values.notifications", Number 1) -- 1 is allow, 2 is block, 0 is default 
       ]
     }
@@ -43,61 +57,60 @@ chromeCapabilities =
 
 chromeConfig :: WebDriverConfig IO
 chromeConfig = defaultWebDriverConfig {
-    _environment = environment {
-      _env = chromeEnv {
+    _environment = defaultWebDriverEnvironment {
+      _logOptions = defaultWebDriverLogOptions {
+        _logSilent = True
+      },
+      _env = defaultWDEnv {
         _remotePort = 9515
       }
     } 
   }
-  where
-    environment = _environment defaultWebDriverConfig
-    chromeEnv = _env environment
 
 -- | The webdriver-w3c tasty setup doesn't allow for capabilities to be passed in any way
 -- so this is function to make a test case
 testWebdriver :: WebDriverConfig IO -> Capabilities -> String -> WebDriverT IO () -> TestTree
 testWebdriver config capabilities name action =
   HUnit.testCase name $ do
-    (res, summary) <- debug action
-    case res of
+    (res1, summary) <- debug $ do
+      r <- Right <$> action
+      pure r
+    case res1 of
       Left err -> HUnit.assertFailure $ show err
-      Right _ -> do
-        when (numFailures summary > 0) $ do
-          HUnit.assertFailure $ "Failures: " ++ show (numFailures summary)
+      Right res -> case res of
+        Left (e :: SomeException) -> HUnit.assertFailure $ show e
+        Right _ -> do
+          when (numFailures summary > 0) $ do
+            HUnit.assertFailure $ "Failures: " ++ show (numFailures summary)
   where
-    debug = debugWebDriverT config . runIsolated_ capabilities
+    debug = debugWebDriverT config . runIsolated capabilities
 
 testChrome :: String -> WebDriverT IO () -> TestTree
 testChrome = testWebdriver chromeConfig chromeCapabilities
 
 testFirefox :: String -> WebDriverT IO () -> TestTree
-testFirefox = testWebdriver defaultWebDriverConfig firefoxCapabilities
+testFirefox = testWebdriver firefoxConfig firefoxCapabilities
 
 main :: IO ()
 main =
-  defaultMain $ do
-    testGroup "Browsers" [
-      withResource (initDriver "chromedriver") killDriver $ \startServer -> testGroup "Chrome" [
-        withResource initTestServer killTestServer $ \getTestServer -> localOption (mkTimeout 10000000) $ testChrome "Subscribe" $ do
-          _ <- liftIO startServer
-          testServer <- liftIO getTestServer
-          subscribe testServer
-      ]
-      , withResource (initDriver "geckodriver") killDriver $ \startServer -> testGroup "Firefox" [
-        withResource initTestServer killTestServer $ \getTestServer -> localOption (mkTimeout 10000000) $ testFirefox "Subscribe" $ do
-          _ <- liftIO startServer
-          testServer <- liftIO getTestServer
-          subscribe testServer
-      ]
-      ]
+  defaultMain $ 
+    localOption (mkTimeout 20000000) $ testGroup "Browsers" [
+        testGroup "Chrome" [
+          withResource initTestServer killTestServer $ \getTestServer -> testChrome "Subscribe" $ do
+            testServer <- liftIO getTestServer
+            subscribe testServer
+          ]
+          , testGroup "Firefox" [
+            withResource initTestServer killTestServer $ \getTestServer -> testFirefox "Subscribe" $ do
+              testServer <- liftIO getTestServer
+              subscribe testServer
+          ]
+        ]
 
 data TestServer = TestServer {
   testServerThread :: ThreadId
 , testServerConfig :: AppConfig
 }
-
-withTestServer :: (IO TestServer -> TestTree) -> TestTree
-withTestServer = withResource initTestServer killTestServer
 
 initTestServer :: IO TestServer
 initTestServer = do
@@ -106,13 +119,20 @@ initTestServer = do
   pure $ TestServer thread cfg
 
 killTestServer :: TestServer -> IO ()
-killTestServer = killThread . testServerThread
+killTestServer server = do
+  putStrLn "Killing test server"
+  killThread $ testServerThread server
 
-waitForSingleSubscription :: TestServer -> IO ()
-waitForSingleSubscription testServer = atomically $ do
-  subs <- readTVar $ appConfigSubscriptions $ testServerConfig testServer
-  when (Set.null subs) retry
-  pure ()
+waitForSingleSubscription :: TVar Bool -> TestServer -> IO Bool
+waitForSingleSubscription delay testServer = do
+  atomically $ do
+    subs <- readTVar $ appConfigSubscriptions $ testServerConfig testServer
+    giveUp <- readTVar delay
+    if (Set.null subs)
+      then if giveUp
+        then pure True
+        else retry
+      else pure giveUp
 
 data RunningDriver = RunningDriver {
   runningDriverConfig :: (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle)
@@ -127,7 +147,8 @@ initDriver name = do
 killDriver :: RunningDriver -> IO ()
 killDriver driver = do
   putStrLn $ "Terminating driver " <> runningDriverName driver
-  cleanupProcess $ runningDriverConfig driver
+  let (_, _, _, p) = runningDriverConfig driver
+  interruptProcessGroupOf p
   putStrLn $ "Terminated driver " <> runningDriverName driver
 
 subscribe :: TestServer -> WebDriverT IO ()
@@ -139,12 +160,16 @@ subscribe testServer = do
   liftIO $ print subscribeButton
   liftIO $ putStrLn "Clicking subscribe button"
   elementClick subscribeButton
-  liftIO $ do
-    putStrLn "Waiting for subscription"
-    waitForSingleSubscription testServer
-    putStrLn "Got subscription"
-    appSendPushNotification (testServerConfig testServer) "test"
-  liftIO $ putStrLn "Waiting for notification"
-  res <- executeScript "window.alert" ["hello"]
-  liftIO $ print res
+  
+  liftIO $ putStrLn "Waiting for subscription"
+  delay <- liftIO $ registerDelay 10000000
+  gaveUp <- liftIO $ waitForSingleSubscription delay testServer
+  when gaveUp $ do
+    deleteSession
+    fail "Timed out waiting for subscription"
+  liftIO $ putStrLn "Got subscription"
+  liftIO $ appSendPushNotification (testServerConfig testServer) "test"
+-- liftIO $ putStrLn "Waiting for notsification"
+-- res <- executeScript "window.alert" ["hello"]
+-- liftIO $ print res
   return ()

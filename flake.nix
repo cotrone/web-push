@@ -48,6 +48,23 @@
                                   ];
           };
       })];
+      web-push-example-tests = pkgs.writeScriptBin "web-push-example-tests" ''
+        trap "kill 0" EXIT
+        echo "Starting geckodriver"
+        ${pkgs.geckodriver}/bin/geckodriver --log error 2>&1 > /dev/null &
+        GECKODRIVER_PID=$!
+
+        echo "Starting chromedriver"
+        ${pkgs.chromedriver}/bin/chromedriver --log-level=SEVERE 2>&1 > /dev/null &
+        CHROMEDRIVER_PID=$!
+
+        echo "Starting web-push-example-tests"
+        ${flake.packages."web-push-example:test:web-push-example-test"}/bin/web-push-example-test
+        EXIT_CODE=$?
+
+        exit $EXIT_CODE
+
+      '';
       pkgs = import nixpkgs {
         inherit system overlays;
         config = haskellNix.config // {
@@ -56,6 +73,9 @@
       };
       flake = pkgs.web-push.flake { } ;
     in flake // {
-      packages = flake.packages // { web-push-testing = web-push-testing; };
+      packages = flake.packages // {
+        web-push-testing = web-push-testing;
+        web-push-example-test = web-push-example-tests;
+      };
     });
 }
