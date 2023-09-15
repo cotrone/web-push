@@ -51,12 +51,29 @@
       web-push-example-tests = pkgs.writeScriptBin "web-push-example-tests" ''
         trap "kill 0" EXIT
         echo "Starting geckodriver"
-        ${pkgs.geckodriver}/bin/geckodriver &
+        ${pkgs.geckodriver}/bin/geckodriver --log error 2>&1 > /dev/null &
         GECKODRIVER_PID=$!
 
         echo "Starting chromedriver"
-        ${pkgs.chromedriver}/bin/chromedriver &
+        ${pkgs.chromedriver}/bin/chromedriver --log-level=SEVERE 2>&1 > /dev/null &
         CHROMEDRIVER_PID=$!
+
+        echo "Wait for geckodriver to start"
+        timeout 30 sh -c 'until ${pkgs.netcat}/bin/nc -z $0 $1; do sleep 1; done' localhost 4444
+        GECKODRIVER_EXIT_CODE=$?
+        if [ $GECKODRIVER_EXIT_CODE -ne 0 ]; then
+          echo "Failed to start geckodriver"
+          exit $GECKODRIVER_EXIT_CODE
+        fi
+
+        echo "Wait for chromedriver to start"
+        timeout 30 sh -c 'until ${pkgs.netcat}/bin/nc -z $0 $1; do sleep 1; done' localhost 9515
+        # Exit if either of the timeout fails
+        CHROMEDRIVER_EXIT_CODE=$?
+        if [ $CHROMEDRIVER_EXIT_CODE -ne 0 ]; then
+          echo "Failed to start chromedriver"
+          exit $CHROMEDRIVER_EXIT_CODE
+        fi
 
         echo "Starting web-push-example-tests"
         ${flake.packages."web-push-example:test:web-push-example-test"}/bin/web-push-example-test
