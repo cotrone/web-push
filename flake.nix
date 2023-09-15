@@ -51,11 +51,11 @@
       web-push-example-tests = pkgs.writeScriptBin "web-push-example-tests" ''
         trap "kill 0" EXIT
         echo "Starting geckodriver"
-        ${pkgs.geckodriver}/bin/geckodriver --log error 2>&1 > /dev/null &
+        ${pkgs.geckodriver}/bin/geckodriver 2>&1 > /dev/null &
         GECKODRIVER_PID=$!
 
         echo "Starting chromedriver"
-        ${pkgs.chromedriver}/bin/chromedriver --log-level=SEVERE 2>&1 > /dev/null &
+        ${pkgs.chromedriver}/bin/chromedriver 2>&1 > /dev/null &
         CHROMEDRIVER_PID=$!
 
         echo "Starting web-push-example-tests"
