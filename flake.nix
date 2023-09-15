@@ -74,7 +74,7 @@
           echo "Failed to start chromedriver"
           exit $CHROMEDRIVER_EXIT_CODE
         fi
-
+        grep MemTotal /proc/meminfo
         sleep 15
 
         echo "Starting web-push-example-tests"
