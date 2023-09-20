@@ -5,20 +5,17 @@ module Main where
 import           Control.Concurrent
 import           Control.Concurrent.STM
 import           Control.Exception
-import           Control.Exception.Safe
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.Aeson
 import qualified Data.HashMap.Strict    as HashMap
 import qualified Data.Set               as Set
-import qualified Data.Text              as Text
 import           System.IO
 import           System.Process
 import           Test.Tasty
 import qualified Test.Tasty.HUnit       as HUnit
 import           Web.Api.WebDriver
 import           System.Environment
-import           System.Posix.Signals (signalProcess, sigINT)
 
 import           WebPushExample
 
@@ -127,9 +124,9 @@ initTestServer = do
   pure $ TestServer thread cfg
 
 killTestServer :: TestServer -> IO ()
-killTestServer server = do
+killTestServer test = do
   putStrLn "Killing test server"
-  killThread $ testServerThread server
+  killThread $ testServerThread test
 
 waitForSingleSubscription :: TVar Bool -> TestServer -> IO Bool
 waitForSingleSubscription delay testServer = do

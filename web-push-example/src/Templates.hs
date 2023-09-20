@@ -2,17 +2,19 @@
 
 module Templates where
 
-import qualified Text.Mustache              as Mustache
-import           Text.Mustache.Compile      (embedSingleTemplate)
+import           Data.ByteString       (ByteString)
 import           Data.FileEmbed
-import System.Directory
-import Language.Haskell.TH
+import           Language.Haskell.TH
+import           System.Directory
+import qualified Text.Mustache         as Mustache
+import           Text.Mustache.Compile (embedSingleTemplate)
 
-serviceWorkerTemplate :: Mustache.Template
-serviceWorkerTemplate = $(embedSingleTemplate "templates/service-worker.js.mustache")
 
-indexTemplate :: Mustache.Template
-indexTemplate = $(embedSingleTemplate "templates/index.html.mustache")
+serviceWorkerJS :: ByteString
+serviceWorkerJS = $(embedFile "templates/service-worker.js")
+
+indexHtml :: ByteString
+indexHtml = $(embedFile "templates/index.html")
 
 indexJsTemplate :: Mustache.Template
 indexJsTemplate = $(embedSingleTemplate "templates/index.js.mustache")

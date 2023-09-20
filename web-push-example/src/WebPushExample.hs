@@ -6,61 +6,36 @@
 module WebPushExample where
 
 
-import           Control.Monad.STM
 import           Control.Concurrent.STM.TVar
 import           Control.Lens
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Control.Monad.STM
 import           Control.Monad.Trans.Reader
-import           Control.Monad.Trans.RWS    (put)
-import qualified Data.Aeson                 as JS
-import qualified Data.ByteString.Lazy       as BSL
-import           Data.Set                   (Set)
-import qualified Data.Set                   as Set
+import qualified Data.Aeson                  as JS
+import qualified Data.ByteString             as BS
+import qualified Data.ByteString.Lazy        as BSL
+import           Data.Set                    (Set)
+import qualified Data.Set                    as Set
 import           Data.Text
-import qualified Data.Text                  as T
-import qualified Data.Text.Encoding         as TE
+import qualified Data.Text                   as T
+import qualified Data.Text.Encoding          as TE
 import           Data.Time
 import           Data.Word
-import qualified Network.HTTP.Client        as HTTP
-import qualified Network.HTTP.Conduit       as HTTP
-import           Network.HTTP.Media         ((//), (/:))
+import qualified Network.HTTP.Client         as HTTP
+import qualified Network.HTTP.Conduit        as HTTP
+import           Network.HTTP.Media          ((//), (/:))
 import           Network.Wai.Handler.Warp
 import           Servant
 import           Servant.API
+import           Servant.Server.StaticFiles
 import           System.Directory
-import qualified Text.Mustache              as Mustache
+import qualified Text.Mustache               as Mustache
 import           Web.FormUrlEncoded
-import qualified Web.WebPush                as WP
-import           Web.WebPush                (sendPushNotification)
+import qualified Web.WebPush                 as WP
+import           Web.WebPush                 (sendPushNotification)
 
 import           Templates
-
--- | HTML content type, this isn't in servant
-data HTML
-
-instance Accept HTML where
-  contentType _ = "text" // "html" /: ("charset", "utf-8")
-
-instance MimeRender HTML Text where
-  mimeRender _ = BSL.fromStrict . TE.encodeUtf8
-
--- | JS content type, this isn't in servant
-data JS
-
-instance Accept JS where
-  contentType _ = "text" // "javascript" /: ("charset", "utf-8")
-
-instance MimeRender JS Text where
-  mimeRender _ = BSL.fromStrict . TE.encodeUtf8
-
--- Server API that serves the the static files, subscribes user agents to push notifications, and sends push notifications
-type API =
-       "service-worker.js" :> Get '[JS] Text -- ^ Service worker script for hanlding push notifications
-  :<|> "index.js" :> Get '[JS] Text -- ^ Index script for registering service worker
-  :<|> "send" :> ReqBody '[FormUrlEncoded] PushNotificationForm :> Post '[JSON] () -- ^ Send a push notification to all subscribers
-  :<|> "subscribe" :> ReqBody '[FormUrlEncoded] Subscription :> Post '[JSON] () -- ^ Subscribe to notifications
-  :<|> Get '[HTML] Text -- ^ Index page
 
 -- | Form for sending a push notification, just the text to send
 newtype PushNotificationForm = PushNotificationForm { pushNotificationText :: Text }
@@ -68,34 +43,64 @@ newtype PushNotificationForm = PushNotificationForm { pushNotificationText :: Te
 instance FromForm PushNotificationForm where
   fromForm form = PushNotificationForm <$> parseUnique "text" form
 
+-- | Subscription to push notifications from the browser
+data Subscription = Subscription {
+  subEndpoint :: Text
+, subAuth     :: Text
+, subP256dh   :: Text
+} deriving (Eq, Ord, Show)
+
+instance JS.FromJSON Subscription where
+  parseJSON = JS.withObject "Subscription" $ \obj -> Subscription
+    <$> obj JS..: "endpoint"
+    <*> obj JS..: "auth"
+    <*> obj JS..: "p256dh"
+
+instance JS.ToJSON Subscription where
+  toJSON (Subscription endpoint auth p256dh) = JS.object [
+      "endpoint" JS..= endpoint
+    , "auth" JS..= auth
+    , "p256dh" JS..= p256dh
+    ]
+
+instance FromForm Subscription where
+  fromForm form =
+    Subscription
+      <$> parseUnique "endpoint" form
+      <*> parseUnique "auth" form
+      <*> parseUnique "p256dh" form
+
+-- Server API that serves the the static files, subscribes user agents to push notifications, and sends push notifications
+type API =
+       "send" :> ReqBody '[FormUrlEncoded] PushNotificationForm :> Post '[JSON] () -- ^ Send a push notification to all subscribers
+  :<|> "subscribe" :> ReqBody '[FormUrlEncoded] Subscription :> Post '[JSON] () -- ^ Subscribe to notifications
+  :<|> Raw -- ^ Serves the static files (index.html, index.js, and service-worker.js) for the browser
+
+-- | Configuration for the web server
+data AppConfig = AppConfig
+  { appConfigVAPIDKeys            :: WP.VAPIDKeys -- ^ Public and private keys for web-push
+  , appConfigVAPIDKeyBytes        :: [Word8] -- ^ Public key for web-push as bytes, passed into the index.js.mustache template
+  , appConfigManager              :: HTTP.Manager -- ^ HTTP manager for sending push notifications
+  , appConfigSubscriptions        :: TVar (Set Subscription) -- ^ Active subscriptions to push notifications
+  , appConfigWriteSubscriptions   :: IO () -- ^ Write subscriptions to a file
+  }
 
 -- | Handler for the API, reads the config from the environment
 type PushHandler = ReaderT AppConfig Handler
 
-server :: ServerT API PushHandler
-server =
-  serveServiceWorker
-  :<|> serveIndexJS
-  :<|> postSendPushNotification
+server :: [Word8] -> ServerT API PushHandler
+server vapidPublicKey =
+       postSendPushNotification
   :<|> postAddSubscriber
-  :<|> serveIndex
-
--- | Serves the service worker script from the template
-serveServiceWorker :: PushHandler Text
-serveServiceWorker = do
-  vapidKeys <- asks appConfigVAPIDKeyBytes
-  pure $ Mustache.substituteValue serviceWorkerTemplate $ Mustache.object [ "serverKey" Mustache.~> vapidKeys ]
-
--- | Serves the index page from the template
-serveIndex :: PushHandler Text
-serveIndex = do
-  pure $ Mustache.substituteValue indexTemplate $ Mustache.object [ ]
-
--- | Serves the index js page from the template
-serveIndexJS :: PushHandler Text
-serveIndexJS = do
-  vapidKeys <- asks appConfigVAPIDKeyBytes
-  pure $ Mustache.substituteValue indexJsTemplate $ Mustache.object [ "applicationServerKey" Mustache.~> vapidKeys ]
+  :<|> serveDirectoryEmbedded staticFiles
+  where
+    -- The static files to serve to the browser
+    -- `index.js` has the VAPID public key embedded in it
+    staticFiles = [
+          ("service-worker.js", serviceWorkerJS )
+        , ("index.html", indexHtml)
+        , ("index.js", TE.encodeUtf8 $ Mustache.substituteValue indexJsTemplate $ Mustache.object [ "serverKey" Mustache.~> vapidPublicKey ])
+      ]
 
 -- | Add a subscriber to the list of subscribers
 postAddSubscriber :: Subscription -> PushHandler ()
@@ -135,73 +140,45 @@ postSendPushNotification (PushNotificationForm text) = do
   cfg <- ask
   liftIO $ appSendPushNotification cfg text
 
-appSendPushNotification :: AppConfig -> Text -> IO ()
+-- | Send a push notification to all subscribers 
+appSendPushNotification :: AppConfig -- ^ Configuration for the application
+                        -> Text -- ^ Text to send in the push notification
+                        -> IO ()
 appSendPushNotification cfg text = do
+  -- Get the current time to use as the tag for the notification
   time <- getCurrentTime
+  -- Get all the subscriptions
   subscribtions <- atomically $ readTVar subs
-  let message = JS.object [
+  let
+    -- This is the message sent to browsers
+    message = JS.object [
           "title" JS..= ("Web Push Test" :: Text)
         , "body" JS..= text
         , "icon" JS..= ("" :: Text)
         , "tag" JS..= T.pack (show time)
         , "url" JS..= ("http://localhost:3000" :: Text)
         ]
-      pushDetails (Subscription endpoint auth p256dh) = (WP.mkPushNotification endpoint p256dh auth)
-                      & WP.pushExpireInSeconds .~ 60 * 60 * 12
-                      & WP.pushMessage .~ message
-                      & WP.pushSenderEmail .~ "test@example.com"
-      sendToSubscription ds = WP.sendPushNotification keys manager ds
+    pushDetails (Subscription endpoint auth p256dh) =
+      (WP.mkPushNotification endpoint p256dh auth) -- The subscription details
+        & WP.pushExpireInSeconds .~ 60 * 60 * 12 -- 12 hours
+        & WP.pushMessage .~ message -- The message we created above
+        & WP.pushSenderEmail .~ "test@example.com" -- The email address of the sender
 
   liftIO $ putStrLn $ "Sending notification to " <> show (Prelude.length subscribtions) <> " subscribers containing message: " <> show text
+  -- Loop over the subscriptions sending each one a notification
   forM_ subscribtions $ \sub -> do
     liftIO $ putStrLn $ "Sending notification to: " <> show sub
-    notificationResult <- sendToSubscription $ pushDetails sub
+    notificationResult <- WP.sendPushNotification keys manager $ pushDetails sub
     liftIO $ putStrLn $ "Notification result: " <> show notificationResult
   where
     keys = appConfigVAPIDKeys cfg
     manager = appConfigManager cfg
     subs = appConfigSubscriptions cfg
 
-data AppConfig = AppConfig
-  { appConfigVAPIDKeys            :: WP.VAPIDKeys
-  , appConfigVAPIDKeyBytes        :: [Word8]
-  , appConfigManager              :: HTTP.Manager
-  , appConfigSubscriptions        :: TVar (Set Subscription)
-  , appConfigWriteSubscriptions   :: IO ()
-  }
-
-data Subscription = Subscription {
-  subEndpoint :: Text
-, subAuth     :: Text
-, subP256dh   :: Text
-} deriving (Eq, Ord, Show)
-
-instance JS.FromJSON Subscription where
-  parseJSON = JS.withObject "Subscription" $ \obj -> Subscription
-    <$> obj JS..: "endpoint"
-    <*> obj JS..: "auth"
-    <*> obj JS..: "p256dh"
-
-instance JS.ToJSON Subscription where
-  toJSON (Subscription endpoint auth p256dh) = JS.object [
-      "endpoint" JS..= endpoint
-    , "auth" JS..= auth
-    , "p256dh" JS..= p256dh
-    ]
-
-instance FromForm Subscription where
-  fromForm form =
-    Subscription
-      <$> parseUnique "endpoint" form
-      <*> parseUnique "auth" form
-      <*> parseUnique "p256dh" form
-
-
-
 runExampleApp :: Int -- ^ Port to run the application on
               -> AppConfig -- ^ Configuration for the application
               -> IO ()
-runExampleApp port cfg = run port (serveWithContextT (Proxy :: Proxy API) EmptyContext (flip runReaderT cfg) server)
+runExampleApp port cfg = run port (serveWithContextT (Proxy :: Proxy API) EmptyContext (flip runReaderT cfg) (server (appConfigVAPIDKeyBytes cfg)))
 
 initInMemoryConfig :: IO AppConfig
 initInMemoryConfig = do

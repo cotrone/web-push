@@ -12,14 +12,43 @@ Forked from https://github.com/sarthakbagaria/web-push
 
 Guides to using Web Push API in browsers can be found on [Mozilla's](https://developer.mozilla.org/en/docs/Web/API/Push_API) and [Google's](https://developers.google.com/web/fundamentals/engage-and-retain/push-notifications/) docs, or you can check out the demo app in the example folder. To run the demo app:
 
-    cd example
-    stack build
-    stack --docker-network=bridge --docker-run-args='--publish=3000:3000' exec web-push-example
+with nix: `nix run .#web-push-example:exe:web-push-example-server`
 
-Then access localhost:3000 from a browser. Keep the browser console open to check if there are errors. For use with docker, the above command requires [stack](https://docs.haskellstack.org/en/stable/README/) 2.4 or above.
+with cabal: `cabal run web-push-example-server`
+
+stack: `stack exec web-push-example-server`
+
+Then access `localhost:3000` from a browser
 
 For production use, store a set of VAPID keys securely and use them for all push notification subscriptions and messages; public key will have to be exposed to client's browser when subscribing to push notifications, but private key must be kept secret and used when generating push notifications on the server. If VAPID keys are re-generated, all push notifications will require re-subscriptions. Also save the latest subscription details such as endpoint from user's browser session securely in the database and use them to send push notifications to the user later.
 
+## Build
+
+The library builds and tests run with both cabal and stack.
+
+There is also a nix flake setup to manage the dependencies for tests.
+
+To build a cabal environment for the project that
+
+### Nix
+
+The nix flake includes:
+
+- A development environment for web-push and web-push-example through `nix develop`
+- A package for the example server `nix run .#web-push-example-server`
+- A package for the mock web push server from https://github.com/marc1706/web-push-testing
+  - `nix run .#web-push-testing -- start` and `nix run .#web-push-testing -- stop` to control it
+  - Launch the server directly with `nix run .#web-push-testing-server -- 8090`
+- Tests for `web-push` and `web-push-example`
+  - For `web-push`: `nix run .#web-push-test`
+  - For `web-push-example`: `nix run .#web-push-example-test`
+- Browser tests for the `web-push-example` server with `nix run .#web-push-example-test`
+
+## Example
+
+There is a minimal example web application that generates keys, stores subscriptions, and sends notifications to all subscribers in [web-push-example](web-push-example/README.md)
+
+## References
 
 Current implementation is based on the following versions of the drafts:
 - [https://tools.ietf.org/html/draft-ietf-webpush-encryption-04](https://tools.ietf.org/html/draft-ietf-webpush-encryption-04)

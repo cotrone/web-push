@@ -8,6 +8,7 @@ nix:
 
 packages:
     - '.'
+    - 'web-push-example'
 
 extra-deps:
     - webdriver-w3c-0.0.3

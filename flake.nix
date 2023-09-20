@@ -118,6 +118,7 @@
     in flake // {
       packages = flake.packages // {
         web-push-testing = web-push-testing;
+        web-push-example-server = flake.packages."web-push-example:exe:web-push-example-server";
         web-push-example-test = web-push-example-test;
         web-push-test = web-push-test;
         populate-ci-cache = populate-ci-cache;
