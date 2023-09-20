@@ -2,6 +2,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module WebPushMock where
 
+import           Control.Concurrent
+import           Control.Exception
 import           Control.Lens               hiding ((.=))
 import           Data.Aeson
 import           Data.ByteString            (ByteString)
@@ -25,10 +27,10 @@ import           Web.WebPush
 
 testSendMessage :: TestTree
 testSendMessage =
-  withResource initWebPushTestingServer terminateProcess $ \_ -> do
+  localOption (mkTimeout (10 ^ (7 :: Integer))) $ withResource initWebPushTestingServer terminateProcess $ \_ -> do
     testCaseSteps "Mock subscription" $ \step -> do
-      step "Checking status"
-      _status <- webPushStatus
+      step "Waiting for status to be accessible"
+      waitForStatus
 
       keys <- either fail (pure . readVAPIDKeys) =<< generateVAPIDKeys
       publicKeyBytes <- either fail (pure . BS.pack) $ vapidPublicKeyBytes keys
@@ -73,6 +75,16 @@ initWebPushTestingServer :: IO ProcessHandle
 initWebPushTestingServer = do
   (_stdIn, _stdOut, _stdErr, procHandle) <- createProcess (proc "web-push-testing-server" [show webPushTestingPort])
   pure procHandle
+
+waitForStatus :: IO ()
+waitForStatus = do
+  resp :: Either SomeException (Response BSL.ByteString) <- try webPushStatus
+  case resp of
+    Left err -> do
+      putStrLn $ "Waiting for web-push-testing-server to start: " <> show err
+      threadDelay 1000000
+      waitForStatus
+    Right _ -> pure ()
 
 {-
 API for the mock server
