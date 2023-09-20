@@ -41,18 +41,30 @@ library
 
   default-language:    Haskell2010
 
-Test-Suite web-push-tests
+Test-Suite web-push-test
   type:                exitcode-stdio-1.0
-  hs-source-dirs:      selenium-tests
+  hs-source-dirs:      test
   main-is:             Main.hs
+  other-modules:       WebPushEncryptionSpec WebPushMock
+  ghc-options:        -Wall -Werror
   build-depends:       base >= 4.7 && < 5
                      , aeson
+                     , base64
+                     , binary
+                     , bytestring
+                     , hspec
+                     , http-client
+                     , lens
+                     , process
                      , tasty
+                     , tasty-hspec >= 1.1.3.2
                      , tasty-hunit
+                     , text
+                     , time
                      , unordered-containers
                      , web-push
-                     , webdriver-w3c >= 0.0.3 && < 0.1
+                     , wreq
 
 source-repository head
   type:     git
-  location: https://github.com/sarthakbagaria/web-push
+  location: https://github.com/cotrone/web-push

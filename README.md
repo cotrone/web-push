@@ -4,7 +4,9 @@
 
 [![Example Browser Tests](https://github.com/cotrone/web-push/actions/workflows/web-push-example.yml/badge.svg)](https://github.com/cotrone/web-push/actions/workflows/web-push-example.yml)
 
-Helper functions to send messages using Web Push protocol.
+Send web push notifications to browsers
+
+Forked from https://github.com/sarthakbagaria/web-push
 
 ## Usage
 

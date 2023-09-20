@@ -22,6 +22,7 @@ module Web.WebPush (
 , VAPIDKeys
 , VAPIDKeysMinDetails(..)
 , PushNotification
+, PushNotificationCreated(..)
 , PushNotificationError(..)
 , PushEndpoint
 , PushP256dh
@@ -86,7 +87,6 @@ generateVAPIDKeys = do
         , publicCoordY = pubY
       }
 
-
 -- | Read VAPID key pair from the 3 integers minimally representing a unique key pair.
 readVAPIDKeys :: VAPIDKeysMinDetails -> VAPIDKeys
 readVAPIDKeys VAPIDKeysMinDetails {..} =
@@ -120,7 +120,8 @@ sendPushNotification vapidKeys httpManager pushNotification = do
     let proto = if secure initReq then "https://" else "http://"
         payload = PushNotificationPayload {
               payloadAudience = TE.decodeUtf8With TE.lenientDecode $ proto <> host initReq
-            , payloadExpiration = round time + 3000 -- TODO configurable expiration
+            , payloadExpiration = round time + fromIntegral (pushNotification ^. pushExpireInSeconds)
+
             , payloadSubject = "mailto:" <> pushNotification ^. pushSenderEmail -- This is marked as optional in the spec but is required by at least firefox and chrome
           }
     jwt <- webPushJWT vapidKeys payload
@@ -170,7 +171,6 @@ sendPushNotification vapidKeys httpManager pushNotification = do
     toPushNotificationError (PushEncryptCryptoError err) = MessageEncryptionFailed err
     toPushNotificationError (PushEncryptParseKeyError err) = KeyParseError err
     toPushNotificationError (PushEncodeApplicationPublicKeyError err) = ApplicationKeyEncodeError err
-
     cryptoKeyHeader :: ECDSA.PublicKey -> ECC.Point -> Either String C8.ByteString
     cryptoKeyHeader vapidPublic ecdhServerPublic = do
       let encodePublic = fmap b64UrlNoPadding . ecPublicKeyToBytes
@@ -195,8 +195,6 @@ sendPushNotification vapidKeys httpManager pushNotification = do
     -- encode the message to a safe representation like base64URL before sending it to encryption algorithms
     -- decode the message through service workers on browsers before trying to read the JSON
     plainMessage64Encoded = A.encode $ pushNotification ^. pushMessage
-
-
 
 type PushEndpoint = T.Text
 type PushP256dh = T.Text
@@ -254,11 +252,11 @@ data VAPIDKeysMinDetails = VAPIDKeysMinDetails { privateNumber :: Integer
 -- |'RecepientEndpointNotFound' comes up when the endpoint is no longer recognized by the push service.
 -- This may happen if the user has cancelled the push subscription, and hence deleted the endpoint.
 -- You may want to delete the endpoint from database in this case, or if 'EndpointParseFailed'.
-data PushNotificationError = EndpointParseFailed HttpException
-                           | MessageEncryptionFailed CryptoError
-                           | KeyParseError CryptoError
-                           | ApplicationKeyEncodeError String
-                           | RecepientEndpointNotFound
-                           | PushRequestFailed SomeException
-                           | PushRequestNotCreated (Response BSL.ByteString)
+data PushNotificationError = EndpointParseFailed HttpException -- ^ Endpoint URL could not be parsed
+                           | MessageEncryptionFailed CryptoError -- ^ Message encryption failed
+                           | KeyParseError CryptoError -- ^ Public key parsing failed
+                           | ApplicationKeyEncodeError String -- ^ Application server key encoding failed
+                           | RecepientEndpointNotFound -- ^ The endpoint is no longer recognized by the push service
+                           | PushRequestFailed SomeException -- ^ Push request failed
+                           | PushRequestNotCreated (Response BSL.ByteString) -- ^ Push request failed with non-201 status code
                             deriving (Show, Exception)

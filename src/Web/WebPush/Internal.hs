@@ -6,12 +6,15 @@ module Web.WebPush.Internal where
 import           Control.Monad.IO.Class     (MonadIO, liftIO)
 import           Crypto.Cipher.AES          (AES128)
 import qualified Crypto.Cipher.Types        as Cipher
+import qualified Crypto.ECC
 import           Crypto.Error               (CryptoError, eitherCryptoError)
 import           Crypto.Hash.Algorithms     (SHA256 (..))
 import qualified Crypto.MAC.HMAC            as HMAC
 import qualified Crypto.PubKey.ECC.DH       as ECDH
 import qualified Crypto.PubKey.ECC.ECDSA    as ECDSA
+import qualified Crypto.PubKey.ECC.P256     as P256
 import qualified Crypto.PubKey.ECC.Types    as ECC
+import qualified Crypto.PubKey.ECC.Types    as ECCTypes
 import           Data.Aeson                 ((.=))
 import qualified Data.Aeson                 as A
 import           Data.Bifunctor
@@ -22,13 +25,10 @@ import           Data.ByteString            (ByteString)
 import qualified Data.ByteString            as BS
 import qualified Data.ByteString.Base64.URL as B64.URL
 import qualified Data.ByteString.Lazy       as LB
+import           Data.Data
 import           Data.Text                  (Text)
 import           Data.Word                  (Word16, Word64, Word8)
 import           GHC.Int                    (Int64)
-import qualified Crypto.ECC
-import Data.Data
-import qualified Crypto.PubKey.ECC.Types as ECCTypes
-import qualified Crypto.PubKey.ECC.P256 as P256
 
 type VAPIDKeys = ECDSA.KeyPair
 
@@ -191,5 +191,6 @@ bytes32Int (d,c,b,a) = (Bits.shiftL (fromIntegral d) (64*3)) +
                                     (fromIntegral a)
 
 -- at most places we do not need the padding in base64 url encoding
+-- TODO this could be removed
 b64UrlNoPadding :: ByteString -> ByteString
 b64UrlNoPadding =  fst . BS.breakSubstring "=" . B64.URL.encode

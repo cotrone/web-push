@@ -11,7 +11,7 @@
     flake-utils.lib.eachSystem [ "x86_64-linux" "x86_64-darwin" "aarch64-darwin" ] (system:
     let
       compiler-nix-name = "ghc928";
-      # Web push is a JS project designed to emulate the behaviour of browsers
+      # Web push is a JS project that emulates the behaviour of push notifications in browsers and the servers that deliver notifications to them
       web-push-testing = pkgs.buildNpmPackage {
         pname = "web-push-testing";
         version = "1.0.0";
@@ -48,6 +48,15 @@
                                   ];
           };
       })];
+      # Wrap the web-push-test binary to include the web-push-testing-server binary in the PATH
+      web-push-test = pkgs.symlinkJoin {
+        name = "web-push-test";
+        nativeBuildInputs = [ pkgs.makeWrapper ];
+        paths = [ web-push-testing flake.packages."web-push:test:web-push-test" ];
+        postFixup = ''
+          wrapProgram $out/bin/web-push-test --prefix PATH : ${web-push-testing}/bin
+        '';
+      };
       web-push-example-test = pkgs.writeScriptBin "web-push-example-test" ''
         export CHROME_BINARY=${pkgs.google-chrome}/bin/google-chrome-stable
         export FIREFOX_BINARY=${pkgs.firefox}/bin/firefox
@@ -103,6 +112,7 @@
       packages = flake.packages // {
         web-push-testing = web-push-testing;
         web-push-example-test = web-push-example-test;
+        web-push-test = web-push-test;
       };
     });
 }
