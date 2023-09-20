@@ -53,7 +53,7 @@
         name = "web-push-test";
         nativeBuildInputs = [ pkgs.makeWrapper ];
         paths = [ web-push-testing flake.packages."web-push:test:web-push-test" ];
-        postFixup = ''
+        postBuild = ''
           wrapProgram $out/bin/web-push-test --prefix PATH : ${web-push-testing}/bin
         '';
       };
@@ -101,6 +101,13 @@
         echo "web-push-example-tests exited with code $EXIT_CODE"
         exit $EXIT_CODE
       '';
+      # Populate the ci cache with the binaries for tests
+      # this requires the cache keys to be set in the environment
+      populate-ci-cache = pkgs.writeScriptBin "populate-ci-cache" ''
+        nix flake archive --json | ${pkgs.jq}/bin/jq -r '.path,(.inputs|to_entries[].value.path)' | ${pkgs.cachix}/bin/cachix push web-push
+        nix build .#web-push-test --json | ${pkgs.jq}/bin/jq -r '.[].outputs | to_entries[].value' | ${pkgs.cachix}/bin/cachix push web-push
+        nix build .#web-push-example-test --json | ${pkgs.jq}/bin/jq -r '.[].outputs | to_entries[].value' | ${pkgs.cachix}/bin/cachix push web-push
+      '';
       pkgs = import nixpkgs {
         inherit system overlays;
         config = haskellNix.config // {
@@ -113,6 +120,7 @@
         web-push-testing = web-push-testing;
         web-push-example-test = web-push-example-test;
         web-push-test = web-push-test;
+        populate-ci-cache = populate-ci-cache;
       };
     });
 }

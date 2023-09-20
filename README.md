@@ -1,7 +1,7 @@
 # web-push
 
 [![Hackage](https://img.shields.io/hackage/v/web-push.svg)](https://hackage.haskell.org/package/web-push)
-
+[![Spec and Mock Tests](https://github.com/cotrone/web-push/actions/workflows/web-push-tests.yml/badge.svg)](https://github.com/cotrone/web-push/actions/workflows/web-push-tests.yml)
 [![Example Browser Tests](https://github.com/cotrone/web-push/actions/workflows/web-push-example.yml/badge.svg)](https://github.com/cotrone/web-push/actions/workflows/web-push-example.yml)
 
 Send web push notifications to browsers
@@ -20,7 +20,6 @@ Then access localhost:3000 from a browser. Keep the browser console open to chec
 
 For production use, store a set of VAPID keys securely and use them for all push notification subscriptions and messages; public key will have to be exposed to client's browser when subscribing to push notifications, but private key must be kept secret and used when generating push notifications on the server. If VAPID keys are re-generated, all push notifications will require re-subscriptions. Also save the latest subscription details such as endpoint from user's browser session securely in the database and use them to send push notifications to the user later.
 
-## References
 
 Current implementation is based on the following versions of the drafts:
 - [https://tools.ietf.org/html/draft-ietf-webpush-encryption-04](https://tools.ietf.org/html/draft-ietf-webpush-encryption-04)
