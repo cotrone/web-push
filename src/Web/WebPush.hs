@@ -147,7 +147,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                         , (hAuthorization, BSL.toStrict $ "WebPush " <> jwt)
                         , ("Crypto-Key", cryptoKeyHeaderContents)
                         , (hContentEncoding, "aesgcm")
-                        , ("Encryption", "salt=" <> (b64UrlNoPadding randSalt))
+                        , ("Encryption", "salt=" <> (B64.URL.encodeBase64Unpadded' randSalt))
                       ]
 
         request = initReq {
@@ -173,7 +173,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
     toPushNotificationError (PushEncodeApplicationPublicKeyError err) = ApplicationKeyEncodeError err
     cryptoKeyHeader :: ECDSA.PublicKey -> ECC.Point -> Either String C8.ByteString
     cryptoKeyHeader vapidPublic ecdhServerPublic = do
-      let encodePublic = fmap b64UrlNoPadding . ecPublicKeyToBytes
+      let encodePublic = fmap B64.URL.encodeBase64Unpadded' . ecPublicKeyToBytes
       dh <- encodePublic ecdhServerPublic
       ecdsa <- encodePublic (ECDSA.public_q vapidPublic)
       pure $  BS.concat [ "dh=", dh, ";", "p256ecdsa=", ecdsa]
@@ -189,9 +189,9 @@ sendPushNotification vapidKeys httpManager pushNotification = do
           410 -> RecepientEndpointNotFound
           _   -> PushRequestFailed err
       | otherwise = PushRequestFailed err
-    authSecretBytes = B64.URL.decodeLenient . TE.encodeUtf8 $ pushNotification ^. pushAuth
+    authSecretBytes = B64.URL.decodeBase64Lenient . TE.encodeUtf8 $ pushNotification ^. pushAuth
     -- extract the 65 bytes of ECDH uncompressed public key received from browser in subscription
-    subscriptionPublicKeyBytes = B64.URL.decodeLenient . TE.encodeUtf8 $ pushNotification ^. pushP256dh
+    subscriptionPublicKeyBytes = B64.URL.decodeBase64Lenient . TE.encodeUtf8 $ pushNotification ^. pushP256dh
     -- encode the message to a safe representation like base64URL before sending it to encryption algorithms
     -- decode the message through service workers on browsers before trying to read the JSON
     plainMessage64Encoded = A.encode $ pushNotification ^. pushMessage

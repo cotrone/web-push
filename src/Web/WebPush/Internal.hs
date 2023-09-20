@@ -52,16 +52,16 @@ instance A.ToJSON PushNotificationPayload where
 webPushJWT :: MonadIO m => VAPIDKeys -> PushNotificationPayload -> m LB.ByteString
 webPushJWT vapidKeys payload = do
   let
-    encodedJWTPayload = b64UrlNoPadding . LB.toStrict . A.encode $ payload
+    encodedJWTPayload = B64.URL.encodeBase64Unpadded' . LB.toStrict . A.encode $ payload
     messageForJWTSignature = encodedJWTHeader <> "." <> encodedJWTPayload
   -- JWT only accepts SHA256 hash with ECDSA for ES256 signed token
   -- ECDSA signing vulnerable to timing attacks
   ECDSA.Signature signR signS <- liftIO $ ECDSA.sign (ECDSA.toPrivateKey vapidKeys) SHA256 messageForJWTSignature
   -- 32 bytes of R followed by 32 bytes of S
-  let encodedJWTSignature = b64UrlNoPadding $ LB.toStrict $ (Binary.encode $ int32Bytes signR) <> (Binary.encode $ int32Bytes signS)
+  let encodedJWTSignature = B64.URL.encodeBase64Unpadded' $ LB.toStrict $ (Binary.encode $ int32Bytes signR) <> (Binary.encode $ int32Bytes signS)
   pure . LB.fromStrict $ messageForJWTSignature <> "." <> encodedJWTSignature
   where
-    encodedJWTHeader = b64UrlNoPadding . LB.toStrict . A.encode $ A.object [
+    encodedJWTHeader = B64.URL.encodeBase64Unpadded' . LB.toStrict . A.encode $ A.object [
         "typ" .= ("JWT" :: Text)
       , "alg" .= ("ES256" :: Text)
       ]
@@ -147,8 +147,6 @@ webPushEncrypt EncryptionInput {..} = do
   where
     handleCryptoError = first PushEncryptCryptoError . eitherCryptoError
     curveP256 = ECCTypes.getCurveByName ECCTypes.SEC_p256r1
-  
-
 
 -- Conversions among integers and bytes
 -- The bytes are in network/big endian order.
@@ -189,8 +187,3 @@ bytes32Int (d,c,b,a) = (Bits.shiftL (fromIntegral d) (64*3)) +
                        (Bits.shiftL (fromIntegral c) (64*2)) +
                        (Bits.shiftL (fromIntegral b) (64  )) +
                                     (fromIntegral a)
-
--- at most places we do not need the padding in base64 url encoding
--- TODO this could be removed
-b64UrlNoPadding :: ByteString -> ByteString
-b64UrlNoPadding =  fst . BS.breakSubstring "=" . B64.URL.encode
