@@ -2,8 +2,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module WebPushMock where
 
-import           Control.Concurrent
-import           Control.Exception
 import           Control.Lens               hiding ((.=))
 import           Data.Aeson
 import           Data.ByteString            (ByteString)
@@ -20,6 +18,7 @@ import           System.Process
 import           Test.Tasty
 import           Test.Tasty.HUnit
 import           Web.WebPush
+import           Network.URI
 
 {-
   These are tests to be ran against a mock web-push server from https://github.com/marc1706/web-push-testing
@@ -30,11 +29,11 @@ testSendMessage =
   localOption (mkTimeout (10 ^ (7 :: Integer))) $ withResource initWebPushTestingServer terminateProcess $ \_ -> do
     testCaseSteps "Mock subscription" $ \step -> do
       step "Waiting for status to be accessible"
-      waitForStatus
+      _ <- webPushStatus
 
-      keys <- either fail (pure . readVAPIDKeys) =<< generateVAPIDKeys
-      publicKeyBytes <- either fail (pure . BS.pack) $ vapidPublicKeyBytes keys
-      let subscriptionOptions = SubscribeOptions True publicKeyBytes
+      keys <- either fail pure =<< generateVAPIDKeys
+      let publicKeyBytes = vapidPublicKeyBytes keys
+      let subscriptionOptions = SubscribeOptions True $ BS.pack publicKeyBytes
 
       step "Creating a test subscription to the mock server"
       subscribeResponse <- webPushSubscribe subscriptionOptions
@@ -42,10 +41,10 @@ testSendMessage =
 
       step "Sending message through the mock server"
       time <- getCurrentTime
-      let notification = (mkPushNotification (endpoint subscription) (p256dh subscription) (auth' subscription))
+      let 
+          notification = mkPushNotification
             & pushExpireInSeconds .~ 60 * 60 * 12
             & pushMessage .~ message
-            & pushSenderEmail .~ "test@example.com"
           message :: Value
           message = object [
               "title" .= ("Web Push Test" :: Text)
@@ -56,7 +55,7 @@ testSendMessage =
             ]
           encodedMessage = TE.decodeUtf8 $ BSL.toStrict $ encode message
       endpointManager <- HTTP.newManager HTTP.defaultManagerSettings
-      either (assertFailure . show) (const (pure ())) =<< sendPushNotification keys endpointManager notification
+      either (assertFailure . show) (const (pure ())) =<< sendPushNotification endpointManager (VapidConfig "mailto:test@example.com" keys) notification (subscriptionResult subscription)
 
       step "Getting notifications"
       notificationsResponse <- webPushGetNotificationsFor (clientHash subscription)
@@ -73,19 +72,13 @@ webPushTestingUrl = "http://localhost:" <> show webPushTestingPort
 -- Initializes the web push testing server binary from path
 initWebPushTestingServer :: IO ProcessHandle
 initWebPushTestingServer = do
-  (_stdIn, _stdOut, _stdErr, procHandle) <- createProcess (proc "web-push-testing-server" [show webPushTestingPort])
+  (_stdIn, Just stdOut, _stdErr, procHandle) <- createProcess mockServer
+  _ <- BS.hGetLine stdOut -- Get a single line to wait for the server to be ready
   pure procHandle
-
-waitForStatus :: IO ()
-waitForStatus = do
-  resp :: Either SomeException (Response BSL.ByteString) <- try webPushStatus
-  case resp of
-    Left err -> do
-      putStrLn $ "Waiting for web-push-testing-server to start: " <> show err
-      threadDelay 1000000
-      waitForStatus
-    Right _ -> pure ()
-
+  where
+    mockServer = (proc "web-push-testing-server" [show webPushTestingPort]) {
+        std_out = CreatePipe
+      }
 {-
 API for the mock server
 -}
@@ -115,20 +108,19 @@ instance ToJSON SubscribeOptions where
       stringlyBool False = "false"
 
 data SubscriptionResult = SubscriptionResult {
-  endpoint :: Text,
-  p256dh :: Text,
-  auth' :: Text,
-  clientHash :: ClientHash
+  subscriptionResult :: Subscription
+, clientHash :: ClientHash
 } deriving (Eq, Ord, Show)
 
 instance FromJSON SubscriptionResult where
   parseJSON = withObject "SubscriptionResult" $ \o -> do
     dataObj <- o .: "data"
-    SubscriptionResult
-      <$> dataObj .: "endpoint"
-      <*> (dataObj .: "keys" >>= (.: "p256dh"))
-      <*> (dataObj .: "keys" >>= (.: "auth"))
-      <*> (ClientHash <$> dataObj .: "clientHash")
+    endpointStr <- dataObj .: "endpoint"
+    endpoint <- maybe (fail $ "Unable to parse endpoint: " <> endpointStr) pure $ parseURI endpointStr
+    subscription <- Subscription endpoint
+                      <$> (dataObj .: "keys" >>= (.: "p256dh"))
+                      <*> (dataObj .: "keys" >>= (.: "auth"))
+    SubscriptionResult subscription <$> (ClientHash <$> dataObj .: "clientHash")
 
 webPushSubscribe :: SubscribeOptions -> IO (Response SubscriptionResult)
 webPushSubscribe opts = asJSON =<< post (webPushTestingUrl <> "/subscribe") (toJSON opts)

@@ -13,8 +13,7 @@ import           Control.Monad.IO.Class
 import           Control.Monad.STM
 import           Control.Monad.Trans.Reader
 import qualified Data.Aeson                  as JS
-import qualified Data.ByteString             as BS
-import qualified Data.ByteString.Lazy        as BSL
+import           Data.Maybe
 import           Data.Set                    (Set)
 import qualified Data.Set                    as Set
 import           Data.Text
@@ -24,16 +23,13 @@ import           Data.Time
 import           Data.Word
 import qualified Network.HTTP.Client         as HTTP
 import qualified Network.HTTP.Conduit        as HTTP
-import           Network.HTTP.Media          ((//), (/:))
+import           Network.URI
 import           Network.Wai.Handler.Warp
 import           Servant
-import           Servant.API
-import           Servant.Server.StaticFiles
 import           System.Directory
 import qualified Text.Mustache               as Mustache
 import           Web.FormUrlEncoded
 import qualified Web.WebPush                 as WP
-import           Web.WebPush                 (sendPushNotification)
 
 import           Templates
 
@@ -44,28 +40,28 @@ instance FromForm PushNotificationForm where
   fromForm form = PushNotificationForm <$> parseUnique "text" form
 
 -- | Subscription to push notifications from the browser
-data Subscription = Subscription {
+data ExampleSubscription = ExampleSubscription {
   subEndpoint :: Text
 , subAuth     :: Text
 , subP256dh   :: Text
 } deriving (Eq, Ord, Show)
 
-instance JS.FromJSON Subscription where
-  parseJSON = JS.withObject "Subscription" $ \obj -> Subscription
+instance JS.FromJSON ExampleSubscription where
+  parseJSON = JS.withObject "ExampleSubscription" $ \obj -> ExampleSubscription
     <$> obj JS..: "endpoint"
     <*> obj JS..: "auth"
     <*> obj JS..: "p256dh"
 
-instance JS.ToJSON Subscription where
-  toJSON (Subscription endpoint auth p256dh) = JS.object [
+instance JS.ToJSON ExampleSubscription where
+  toJSON (ExampleSubscription endpoint auth p256dh) = JS.object [
       "endpoint" JS..= endpoint
     , "auth" JS..= auth
     , "p256dh" JS..= p256dh
     ]
 
-instance FromForm Subscription where
+instance FromForm ExampleSubscription where
   fromForm form =
-    Subscription
+    ExampleSubscription
       <$> parseUnique "endpoint" form
       <*> parseUnique "auth" form
       <*> parseUnique "p256dh" form
@@ -73,15 +69,15 @@ instance FromForm Subscription where
 -- Server API that serves the the static files, subscribes user agents to push notifications, and sends push notifications
 type API =
        "send" :> ReqBody '[FormUrlEncoded] PushNotificationForm :> Post '[JSON] () -- ^ Send a push notification to all subscribers
-  :<|> "subscribe" :> ReqBody '[FormUrlEncoded] Subscription :> Post '[JSON] () -- ^ Subscribe to notifications
+  :<|> "subscribe" :> ReqBody '[FormUrlEncoded] ExampleSubscription :> Post '[JSON] () -- ^ Subscribe to notifications
   :<|> Raw -- ^ Serves the static files (index.html, index.js, and service-worker.js) for the browser
 
 -- | Configuration for the web server
 data AppConfig = AppConfig
-  { appConfigVAPIDKeys            :: WP.VAPIDKeys -- ^ Public and private keys for web-push
+  { appConfigVAPIDKeys            :: WP.VAPIDKeysMinDetails -- ^ Public and private keys for web-push
   , appConfigVAPIDKeyBytes        :: [Word8] -- ^ Public key for web-push as bytes, passed into the index.js.mustache template
   , appConfigManager              :: HTTP.Manager -- ^ HTTP manager for sending push notifications
-  , appConfigSubscriptions        :: TVar (Set Subscription) -- ^ Active subscriptions to push notifications
+  , appConfigSubscriptions        :: TVar (Set ExampleSubscription) -- ^ Active subscriptions to push notifications
   , appConfigWriteSubscriptions   :: IO () -- ^ Write subscriptions to a file
   }
 
@@ -103,7 +99,7 @@ server vapidPublicKey =
       ]
 
 -- | Add a subscriber to the list of subscribers
-postAddSubscriber :: Subscription -> PushHandler ()
+postAddSubscriber :: ExampleSubscription -> PushHandler ()
 postAddSubscriber sub = do
   writeSubscriptions <- asks appConfigWriteSubscriptions
   subscriptionRef <- asks appConfigSubscriptions
@@ -115,24 +111,6 @@ postAddSubscriber sub = do
 -- | Filepath subscriptions are persisted to
 subscriptionsFp :: FilePath
 subscriptionsFp = "subscriptions.json"
-
--- | Write all subscriptions to a file
-writeSubscriptions :: TVar (Set Subscription) -> IO ()
-writeSubscriptions ref =  do
-  subs <- atomically $ readTVar ref
-  JS.encodeFile subscriptionsFp subs
-
--- | Initialize subscriptions from a file if they exist
-initPersistentSubscriptions :: IO (TVar (Set Subscription))
-initPersistentSubscriptions = do
-  e <- doesFileExist subscriptionsFp
-  if e
-    then do
-      subs <- JS.decodeFileStrict subscriptionsFp
-      case subs of
-        Nothing   -> fail "Unable to read subscriptions"
-        Just subs -> newTVarIO subs
-    else newTVarIO mempty
 
 -- | Send a push notification to all subscribers
 postSendPushNotification :: PushNotificationForm -> PushHandler ()
@@ -158,22 +136,30 @@ appSendPushNotification cfg text = do
         , "tag" JS..= T.pack (show time)
         , "url" JS..= ("http://localhost:3000" :: Text)
         ]
-    pushDetails (Subscription endpoint auth p256dh) =
-      (WP.mkPushNotification endpoint p256dh auth) -- The subscription details
+    pushDetails =
+      WP.mkPushNotification -- The subscription details
         & WP.pushExpireInSeconds .~ 60 * 60 * 12 -- 12 hours
         & WP.pushMessage .~ message -- The message we created above
-        & WP.pushSenderEmail .~ "test@example.com" -- The email address of the sender
 
   liftIO $ putStrLn $ "Sending notification to " <> show (Prelude.length subscribtions) <> " subscribers containing message: " <> show text
-  -- Loop over the subscriptions sending each one a notification
-  forM_ subscribtions $ \sub -> do
-    liftIO $ putStrLn $ "Sending notification to: " <> show sub
-    notificationResult <- WP.sendPushNotification keys manager $ pushDetails sub
-    liftIO $ putStrLn $ "Notification result: " <> show notificationResult
+  
+  -- Send all notifications
+  let vapidConfig = WP.VapidConfig "mailto:test@example.com" keys
+  liftIO $ putStrLn "Sending batch notifications "
+  results <- WP.sendPushNotifications manager vapidConfig pushDetails $ catMaybes (toWebPushSubscription <$> Set.toList subscribtions)
+  forM_ results $ \res -> do
+    case res of
+      (sub, Left err) -> putStrLn $ "Error sending notification to: " <> show sub <> " with error: " <> show err
+      (sub, Right _)  -> putStrLn $ "Notification sent to: " <> show sub
   where
     keys = appConfigVAPIDKeys cfg
     manager = appConfigManager cfg
     subs = appConfigSubscriptions cfg
+
+toWebPushSubscription :: ExampleSubscription -> Maybe WP.Subscription
+toWebPushSubscription (ExampleSubscription endpoint auth p256dh) = do
+  uri <- parseURI $ T.unpack endpoint
+  pure $ WP.Subscription uri auth p256dh
 
 runExampleApp :: Int -- ^ Port to run the application on
               -> AppConfig -- ^ Configuration for the application
@@ -182,9 +168,9 @@ runExampleApp port cfg = run port (serveWithContextT (Proxy :: Proxy API) EmptyC
 
 initInMemoryConfig :: IO AppConfig
 initInMemoryConfig = do
-  vapidKeys <- either fail (pure . WP.readVAPIDKeys) =<< WP.generateVAPIDKeys
+  vapidKeys <- either fail pure =<< WP.generateVAPIDKeys
   subscriptions <- newTVarIO mempty
-  keyBytes <- either fail pure $ WP.vapidPublicKeyBytes vapidKeys
+  let keyBytes = WP.vapidPublicKeyBytes vapidKeys
   manager <- HTTP.newManager HTTP.tlsManagerSettings
   pure $ AppConfig vapidKeys keyBytes manager subscriptions (pure ())
 
@@ -192,26 +178,26 @@ initPersistentConfig :: IO AppConfig
 initPersistentConfig = do
   vapidKeys <- initPersistentKeys
   subscriptions <- initPersistentSubscriptions
-  keyBytes <- either fail pure $ WP.vapidPublicKeyBytes vapidKeys
+  let keyBytes = WP.vapidPublicKeyBytes vapidKeys
   manager <- HTTP.newManager HTTP.tlsManagerSettings
   pure $ AppConfig vapidKeys keyBytes manager subscriptions (writeSubscriptions subscriptions)
   where
-    initPersistentKeys :: IO WP.VAPIDKeys
+    initPersistentKeys :: IO WP.VAPIDKeysMinDetails
     initPersistentKeys = do
       keysExist <- doesFileExist fp
       if keysExist
-        then (maybe (fail "Unable to read keys") (pure . WP.readVAPIDKeys . from)) =<< JS.decodeFileStrict fp
+        then (maybe (fail "Unable to read keys") (pure . decodeKeys)) =<< JS.decodeFileStrict fp
         else do
           putStrLn "Generating keys"
           keys <- either fail pure =<< WP.generateVAPIDKeys
-          JS.encodeFile fp $ to keys
-          pure $ WP.readVAPIDKeys keys
+          JS.encodeFile fp $ encodeKeys keys
+          pure keys
       where
         fp = "vapid-keys.json"
-        to (WP.VAPIDKeysMinDetails n x y) = (n , x , y)
-        from (n , x , y) = WP.VAPIDKeysMinDetails n x y
+        encodeKeys (WP.VAPIDKeysMinDetails n x y) = (n , x , y)
+        decodeKeys (n, x, y) = WP.VAPIDKeysMinDetails n x y
     -- Initialize subscriptions from a file if they exist
-    initPersistentSubscriptions :: IO (TVar (Set Subscription))
+    initPersistentSubscriptions :: IO (TVar (Set ExampleSubscription))
     initPersistentSubscriptions = do
       e <- doesFileExist subscriptionsFp
       if e
@@ -219,10 +205,10 @@ initPersistentConfig = do
           subs <- JS.decodeFileStrict subscriptionsFp
           case subs of
             Nothing   -> fail "Unable to read subscriptions"
-            Just subs -> newTVarIO subs
+            Just s -> newTVarIO s
         else newTVarIO mempty
     -- Write all subscriptions to a file
-    writeSubscriptions :: TVar (Set Subscription) -> IO ()
+    writeSubscriptions :: TVar (Set ExampleSubscription) -> IO ()
     writeSubscriptions ref =  do
       subs <- atomically $ readTVar ref
       JS.encodeFile subscriptionsFp subs

@@ -31,8 +31,9 @@ spec = describe "Web Push Encryption Test" $ do
           , plainText = "I am the walrus"
           , paddingLength = 0
           }
-
-        encryptionOutput = webPushEncrypt encryptionInput
+        -- TODO update encryption input type
+        (Right input') = mkEncryptionInput' encryptionInput
+        encryptionOutput = webPushEncrypt input'
 
         expectedEncryptionOutput = EncryptionOutput
             { sharedECDHSecretBytes = decodeBase64Lenient $ BS.concat [ "RNjC-"

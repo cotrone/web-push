@@ -3,65 +3,74 @@
 
 module Web.WebPush.Internal where
 
-import           Control.Monad.IO.Class     (MonadIO, liftIO)
-import           Crypto.Cipher.AES          (AES128)
-import qualified Crypto.Cipher.Types        as Cipher
+import           Crypto.Cipher.AES               (AES128)
+import qualified Crypto.Cipher.Types             as Cipher
 import qualified Crypto.ECC
-import           Crypto.Error               (CryptoError, eitherCryptoError)
-import           Crypto.Hash.Algorithms     (SHA256 (..))
-import qualified Crypto.MAC.HMAC            as HMAC
-import qualified Crypto.PubKey.ECC.DH       as ECDH
-import qualified Crypto.PubKey.ECC.ECDSA    as ECDSA
-import qualified Crypto.PubKey.ECC.P256     as P256
-import qualified Crypto.PubKey.ECC.Types    as ECC
-import qualified Crypto.PubKey.ECC.Types    as ECCTypes
-import           Data.Aeson                 ((.=))
-import qualified Data.Aeson                 as A
+import           Crypto.Error                    (CryptoError,
+                                                  eitherCryptoError)
+import           Crypto.Hash.Algorithms          (SHA256 (..))
+import qualified Crypto.MAC.HMAC                 as HMAC
+import qualified Crypto.PubKey.ECC.DH            as ECDH
+import qualified Crypto.PubKey.ECC.ECDSA         as ECDSA
+import qualified Crypto.PubKey.ECC.P256          as P256
+import qualified Crypto.PubKey.ECC.Types         as ECC
+import qualified Crypto.PubKey.ECC.Types         as ECCTypes
+import           Crypto.Random
+import           Data.Aeson                      ((.=))
+import qualified Data.Aeson                      as A
 import           Data.Bifunctor
-import qualified Data.Binary                as Binary
-import qualified Data.Bits                  as Bits
-import qualified Data.ByteArray             as ByteArray
-import           Data.ByteString            (ByteString)
-import qualified Data.ByteString            as BS
-import qualified Data.ByteString.Base64.URL as B64.URL
-import qualified Data.ByteString.Lazy       as LB
+import qualified Data.Binary                     as Binary
+import qualified Data.Bits                       as Bits
+import qualified Data.ByteArray                  as ByteArray
+import           Data.ByteString                 (ByteString)
+import qualified Data.ByteString                 as BS
+import qualified Data.ByteString.Lazy            as LB
+import qualified Data.ByteString.Lazy.Base64.URL as B64.URL
 import           Data.Data
-import           Data.Text                  (Text)
-import           Data.Word                  (Word16, Word64, Word8)
-import           GHC.Int                    (Int64)
+import           Data.Text                       (Text)
+import           Data.Word                       (Word16, Word64, Word8)
+import           GHC.Int                         (Int64)
+import qualified Data.Text as T
+import Network.URI
+import Control.Monad.IO.Class
+import Network.HTTP.Types
 
-type VAPIDKeys = ECDSA.KeyPair
+newtype VAPIDKeys = VAPIDKeys {
+  unVAPIDKeys :: ECDSA.KeyPair
+}
 
-data PushNotificationPayload = PushNotificationPayload {
-  payloadAudience :: Text
-, payloadExpiration :: Int
-, payloadSubject :: Text
+-- | Server identification for a single host, used to identify the server to the remote push server
+data ServerIdentification = ServerIdentification {
+  serverIdentificationAudience :: Text
+, serverIdentificationExpiration :: Int
+, serverIdentificationSubject :: Text -- ^ Contact information for the server, either email URI in rfc6068 format 'mailto:text@example.com' or HTTPS URL in rfc2818 format 'https://example.com/contact'
 } deriving (Show)
+ -- TODO make identification subject a parsed URI
 
-instance A.ToJSON PushNotificationPayload where
+instance A.ToJSON ServerIdentification where
   toJSON p = A.object [
-      "aud" .= payloadAudience p
-    , "exp" .= payloadExpiration p
-    , "sub" .= payloadSubject p
+      "aud" .= serverIdentificationAudience p
+    , "exp" .= serverIdentificationExpiration p
+    , "sub" .= serverIdentificationSubject p
     ]
 
 ----------------------------
 -- Manual implementation without using the JWT libraries.
 -- Not using jose library. Check the below link for reason:
 -- https://github.com/sarthakbagaria/web-push/pull/1#issuecomment-471254455
-webPushJWT :: MonadIO m => VAPIDKeys -> PushNotificationPayload -> m LB.ByteString
+webPushJWT :: MonadRandom m => VAPIDKeys -> ServerIdentification -> m BS.ByteString
 webPushJWT vapidKeys payload = do
-  let
-    encodedJWTPayload = B64.URL.encodeBase64Unpadded' . LB.toStrict . A.encode $ payload
-    messageForJWTSignature = encodedJWTHeader <> "." <> encodedJWTPayload
   -- JWT only accepts SHA256 hash with ECDSA for ES256 signed token
   -- ECDSA signing vulnerable to timing attacks
-  ECDSA.Signature signR signS <- liftIO $ ECDSA.sign (ECDSA.toPrivateKey vapidKeys) SHA256 messageForJWTSignature
-  -- 32 bytes of R followed by 32 bytes of S
-  let encodedJWTSignature = B64.URL.encodeBase64Unpadded' $ LB.toStrict $ (Binary.encode $ int32Bytes signR) <> (Binary.encode $ int32Bytes signS)
-  pure . LB.fromStrict $ messageForJWTSignature <> "." <> encodedJWTSignature
+  signature <- ECDSA.sign (ECDSA.toPrivateKey $ unVAPIDKeys vapidKeys) SHA256 jwtMessage
+  pure $ jwtMessage <> "." <> jwtSignature signature
   where
-    encodedJWTHeader = B64.URL.encodeBase64Unpadded' . LB.toStrict . A.encode $ A.object [
+    jwtSignature (ECDSA.Signature signR signS) =
+      -- 32 bytes of R followed by 32 bytes of S
+      BS.toStrict . B64.URL.encodeBase64Unpadded' $ Binary.encode (int32Bytes signR, int32Bytes signS)
+    jwtPayload = B64.URL.encodeBase64Unpadded' . A.encode $ payload
+    jwtMessage = BS.toStrict $ jwtHeader <> "." <> jwtPayload
+    jwtHeader = B64.URL.encodeBase64Unpadded' . A.encode $ A.object [
         "typ" .= ("JWT" :: Text)
       , "alg" .= ("ES256" :: Text)
       ]
@@ -77,6 +86,40 @@ data WebPushEncryptionInput = EncryptionInput {
 , paddingLength :: Int64
 } deriving (Show)
 
+data WebPushEncryptionInput' = EncryptionInput' {
+  applicationServerPrivateKey' :: ECDH.PrivateNumber
+, applicationServerPublicKeyBytes' :: BS.ByteString
+, userAgentPublicKey' :: ECC.Point
+, userAgentPublicKeyBytes' :: ByteString
+, authenticationSecret' :: ByteString
+, salt' :: ByteString
+, plainText' :: LB.ByteString
+, paddingLength' :: Int64
+} deriving (Show)
+
+data EncryptInputError =
+    EncryptInputPublicKeyError CryptoError
+  | EncryptInputApplicationPublicKeyError String
+  deriving (Eq, Show)
+
+-- TODO update encryption input type
+mkEncryptionInput' :: WebPushEncryptionInput -> Either EncryptInputError WebPushEncryptionInput'
+mkEncryptionInput' input = do
+  userAgentPublicKey <- first EncryptInputPublicKeyError . ecBytesToPublicKey $ userAgentPublicKeyBytes input
+  applicationServerPublicKey <- first EncryptInputApplicationPublicKeyError . ecPublicKeyToBytes $ ECDH.calculatePublic curveP256 $ applicationServerPrivateKey input 
+  pure $ EncryptionInput' {
+      applicationServerPrivateKey' = applicationServerPrivateKey input
+    , applicationServerPublicKeyBytes' = applicationServerPublicKey
+    , userAgentPublicKeyBytes' = userAgentPublicKeyBytes input
+    , userAgentPublicKey' = userAgentPublicKey
+    , authenticationSecret' = authenticationSecret input
+    , salt' = salt input
+    , plainText' = plainText input
+    , paddingLength' = paddingLength input
+    }
+  where
+    curveP256 = ECCTypes.getCurveByName ECCTypes.SEC_p256r1
+
 -- | Intermediate encryption output used in tests
 -- All in raw bytes
 data WebPushEncryptionOutput = EncryptionOutput {
@@ -90,63 +133,69 @@ data WebPushEncryptionOutput = EncryptionOutput {
 , encryptedMessage :: ByteString
 }
 
-data PushEncryptError =
-    PushEncryptCryptoError CryptoError
-  | PushEncryptParseKeyError CryptoError
-  | PushEncodeApplicationPublicKeyError String
+data EncryptError =
+    EncryptCryptoError CryptoError
+  | EncodeApplicationPublicKeyError String
+  | EncryptCipherInitError CryptoError
+  | EncryptAeadInitError CryptoError
   deriving (Eq, Show)
 
--- | payload encryption
+-- | Payload encryption
 -- https://tools.ietf.org/html/draft-ietf-webpush-encryption-04
-webPushEncrypt :: WebPushEncryptionInput -> Either PushEncryptError WebPushEncryptionOutput
-webPushEncrypt EncryptionInput {..} = do
-  userAgentPublicKey <- first PushEncryptParseKeyError $ ecBytesToPublicKey userAgentPublicKeyBytes
-  applicationServerPublicKeyBytes <- first PushEncodeApplicationPublicKeyError $ ecPublicKeyToBytes $ ECDH.calculatePublic curveP256 applicationServerPrivateKey
-  let 
-    sharedECDHSecret = ECDH.getShared curveP256 applicationServerPrivateKey userAgentPublicKey
-
-    -- HMAC key derivation (HKDF, here expanded into HMAC steps as specified in web push encryption spec)
-    pseudoRandomKeyCombine = HMAC.hmac authenticationSecret sharedECDHSecret :: HMAC.HMAC SHA256
-    authInfo = "Content-Encoding: auth" <> "\x00" :: ByteString
-    inputKeyingMaterial = HMAC.hmac pseudoRandomKeyCombine (authInfo <> "\x01") :: HMAC.HMAC SHA256
-
-    context = "P-256" <> "\x00" <> "\x00" <> "\x41" <> userAgentPublicKeyBytes <> "\x00" <> "\x41" <> applicationServerPublicKeyBytes
-
-    pseudoRandomKeyEncryption = HMAC.hmac salt inputKeyingMaterial :: HMAC.HMAC SHA256
-    contentEncryptionKeyContext = "Content-Encoding: aesgcm" <> "\x00" <> context
-    contentEncryptionKey = BS.pack $ take 16 $ ByteArray.unpack (HMAC.hmac pseudoRandomKeyEncryption (contentEncryptionKeyContext <> "\x01") :: HMAC.HMAC SHA256)
-
-    nonceContext = "Content-Encoding: nonce" <> "\x00" <> context
-    nonce = BS.pack $ take 12 $ ByteArray.unpack (HMAC.hmac pseudoRandomKeyEncryption (nonceContext <> "\x01") :: HMAC.HMAC SHA256)
-
-    -- HMAC a doesn't have Show instance needed for test suite
-    -- so we extract the bytes and store that in WebPushEncryptionOutput
-    inputKeyingMaterialBytes = ByteArray.convert inputKeyingMaterial
-    sharedECDHSecretBytes = ByteArray.convert sharedECDHSecret
-
+webPushEncrypt :: WebPushEncryptionInput' -> Either EncryptError WebPushEncryptionOutput
+webPushEncrypt EncryptionInput'{..} = do -- TODO remove record wildcards
+  -- aes_gcm is aead (authenticated encryption with associated data)
+  -- use cek as the encryption key and nonce as the initialization vector
+  aesCipher :: AES128 <- first EncryptCipherInitError . eitherCryptoError $ Cipher.cipherInit contentEncryptionKey
+  aeadGcmCipher <- first EncryptAeadInitError . eitherCryptoError $ Cipher.aeadInit Cipher.AEAD_GCM aesCipher nonce
+  let
+      -- tag length 16 bytes (maximum), anything less than 16 bytes may not be secure enough
+      -- spec says final encrypted size is 16 bits longer than the padded text
+      -- NOTE: the final encrypted message must be sent as raw binary data 
+      authTag = ByteArray.convert $ Cipher.unAuthTag authTagBytes
+      (authTagBytes, cipherText) = Cipher.aeadSimpleEncrypt aeadGcmCipher BS.empty paddedPlainText 16
+      encryptedMessage = cipherText <> authTag
+      -- HMAC a doesn't have Show instance needed for test suite
+      -- so we extract the bytes and store that in WebPushEncryptionOutput
+      inputKeyingMaterialBytes = ByteArray.convert inputKeyingMaterial
+      sharedECDHSecretBytes = ByteArray.convert sharedECDHSecret
+  pure $ EncryptionOutput {..}
+  where
     -- padding length encoded in 2 bytes, followed by
     -- padding length times '0' byte, followed by
     -- message
     paddedPlainText = LB.toStrict $
-                          (Binary.encode (fromIntegral paddingLength :: Word16)) <>
-                          (LB.replicate paddingLength (0 :: Word8)) <>
-                          plainText
-
-  -- aes_gcm is aead (authenticated encryption with associated data)
-  -- use cek as the encryption key and nonce as the initialization vector
-  aesCipher :: AES128 <- handleCryptoError $ Cipher.cipherInit contentEncryptionKey
-  aeadGcmCipher <- handleCryptoError $ Cipher.aeadInit Cipher.AEAD_GCM aesCipher nonce
-  -- tag length 16 bytes (maximum), anything less than 16 bytes may not be secure enough
-  -- spec says final encrypted size is 16 bits longer than the padded text
-  -- NOTE: the final encrypted message must be sent as raw binary data
-  let
-    (authTagBytes, cipherText) = Cipher.aeadSimpleEncrypt aeadGcmCipher BS.empty paddedPlainText 16
-    authTag = ByteArray.convert $ Cipher.unAuthTag authTagBytes
-    encryptedMessage = cipherText <> authTag
-  pure $ EncryptionOutput {..}
-  where
-    handleCryptoError = first PushEncryptCryptoError . eitherCryptoError
+                          (Binary.encode (fromIntegral paddingLength' :: Word16)) <>
+                          (LB.replicate paddingLength' (0 :: Word8)) <>
+                          plainText'
+    sharedECDHSecret = ECDH.getShared curveP256 applicationServerPrivateKey' userAgentPublicKey'
+    inputKeyingMaterial = HMAC.hmac pseudoRandomKeyCombine (authInfo <> "\x01") :: HMAC.HMAC SHA256
+    -- HMAC key derivation (HKDF, here expanded into HMAC steps as specified in web push encryption spec)
+    pseudoRandomKeyCombine = HMAC.hmac authenticationSecret' sharedECDHSecret :: HMAC.HMAC SHA256
+    authInfo = "Content-Encoding: auth" <> "\x00" :: ByteString
+    context = "P-256" <> "\x00" <> "\x00" <> "\x41" <> userAgentPublicKeyBytes' <> "\x00" <> "\x41" <> applicationServerPublicKeyBytes'
+    pseudoRandomKeyEncryption = HMAC.hmac salt' inputKeyingMaterial :: HMAC.HMAC SHA256
+    contentEncryptionKey = BS.take 16 $ ByteArray.convert (HMAC.hmac pseudoRandomKeyEncryption (contentEncryptionKeyContext <> "\x01") :: HMAC.HMAC SHA256)
+    contentEncryptionKeyContext = "Content-Encoding: aesgcm" <> "\x00" <> context
+    nonceContext = "Content-Encoding: nonce" <> "\x00" <> context
+    nonce = BS.pack $ take 12 $ ByteArray.unpack (HMAC.hmac pseudoRandomKeyEncryption (nonceContext <> "\x01") :: HMAC.HMAC SHA256)
     curveP256 = ECCTypes.getCurveByName ECCTypes.SEC_p256r1
+
+-- | Authorization header for a vapid push notification request
+-- this is shared between all push notifications sent to a single push service host
+hostHeaders :: (MonadIO m, MonadRandom m)
+            => VAPIDKeys
+            -> ServerIdentification
+            -> m [Header]
+hostHeaders vapidKeys serverIdentification = do
+  jwt <- webPushJWT vapidKeys serverIdentification
+  pure [(hAuthorization, "WebPush " <> jwt)]
+
+-- | The host for URI including scheme and port
+uriHost :: URI -> Maybe T.Text
+uriHost uri = do
+  regName <- uriRegName <$> uriAuthority uri
+  pure $ T.pack $ uriScheme uri <> regName
 
 -- Conversions among integers and bytes
 -- The bytes are in network/big endian order.
@@ -157,13 +206,17 @@ webPushEncrypt EncryptionInput {..} = do
     -- and decoding to 4 word64 will fail because of short input
  -}
 ecPublicKeyToBytes :: ECC.Point -> Either String ByteString
-ecPublicKeyToBytes p = Crypto.ECC.encodePoint (Proxy :: Proxy Crypto.ECC.Curve_P256R1) <$> fromECCPoint p
+ecPublicKeyToBytes p = ecPublicKeyToBytes' <$> fromECCPoint p
   where
     fromECCPoint ECC.PointO = Left "Invalid public key infinity point"
-    fromECCPoint (ECC.Point x y) = Right $ P256.pointFromIntegers (x,y)
+    fromECCPoint (ECC.Point x y) = Right (x,y)
+
+ecPublicKeyToBytes' :: (Integer, Integer) -> ByteString
+ecPublicKeyToBytes' = Crypto.ECC.encodePoint (Proxy :: Proxy Crypto.ECC.Curve_P256R1) . P256.pointFromIntegers
 
 ecBytesToPublicKey :: ByteString -> Either CryptoError ECC.Point
-ecBytesToPublicKey = eitherCryptoError . fmap toECCPoint . Crypto.ECC.decodePoint (Proxy :: Proxy Crypto.ECC.Curve_P256R1)
+ecBytesToPublicKey =
+  eitherCryptoError . fmap toECCPoint . Crypto.ECC.decodePoint (Proxy :: Proxy Crypto.ECC.Curve_P256R1)
   where toECCPoint = uncurry ECC.Point . P256.pointToIntegers 
 
 -- Coordinates on Elliptic Curves are 32 bit integers

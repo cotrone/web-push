@@ -34,13 +34,14 @@ library
                     , http-media
                     , lens
                     , mustache
+                    , network-uri
                     , servant
                     , servant-server
                     , stm
+                    , template-haskell
                     , text
                     , time
                     , transformers
-                    , template-haskell
                     , warp
                     , web-push ^>= 0.5
 
