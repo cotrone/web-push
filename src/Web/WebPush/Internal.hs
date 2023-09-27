@@ -164,7 +164,7 @@ hostHeaders vapidKeys serverIdentification = do
 uriHost :: URI -> Maybe T.Text
 uriHost uri = do
   regName <- uriRegName <$> uriAuthority uri
-  pure $ T.pack $ uriScheme uri <> regName
+  pure $ T.pack $ uriScheme uri <> "//" <> regName
 
 -- Conversions among integers and bytes
 -- The bytes are in network/big endian order.

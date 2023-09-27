@@ -159,7 +159,7 @@ subscribe testServer = do
   gaveUp <- liftIO $ waitForSingleSubscription delay testServer
   when gaveUp $ do
     deleteSession
-    fail "Timed out waiting for subscription"
+    assertFailure "Timed out waiting for subscription"
   liftIO $ putStrLn "Got subscription"
   liftIO $ appSendPushNotification (testServerConfig testServer) "test"
 -- liftIO $ putStrLn "Waiting for notsification"
