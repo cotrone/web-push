@@ -86,40 +86,6 @@ data WebPushEncryptionInput = EncryptionInput {
 , paddingLength :: Int64
 } deriving (Show)
 
-data WebPushEncryptionInput' = EncryptionInput' {
-  applicationServerPrivateKey' :: ECDH.PrivateNumber
-, applicationServerPublicKeyBytes' :: BS.ByteString
-, userAgentPublicKey' :: ECC.Point
-, userAgentPublicKeyBytes' :: ByteString
-, authenticationSecret' :: ByteString
-, salt' :: ByteString
-, plainText' :: LB.ByteString
-, paddingLength' :: Int64
-} deriving (Show)
-
-data EncryptInputError =
-    EncryptInputPublicKeyError CryptoError
-  | EncryptInputApplicationPublicKeyError String
-  deriving (Eq, Show)
-
--- TODO update encryption input type
-mkEncryptionInput' :: WebPushEncryptionInput -> Either EncryptInputError WebPushEncryptionInput'
-mkEncryptionInput' input = do
-  userAgentPublicKey <- first EncryptInputPublicKeyError . ecBytesToPublicKey $ userAgentPublicKeyBytes input
-  applicationServerPublicKey <- first EncryptInputApplicationPublicKeyError . ecPublicKeyToBytes $ ECDH.calculatePublic curveP256 $ applicationServerPrivateKey input 
-  pure $ EncryptionInput' {
-      applicationServerPrivateKey' = applicationServerPrivateKey input
-    , applicationServerPublicKeyBytes' = applicationServerPublicKey
-    , userAgentPublicKeyBytes' = userAgentPublicKeyBytes input
-    , userAgentPublicKey' = userAgentPublicKey
-    , authenticationSecret' = authenticationSecret input
-    , salt' = salt input
-    , plainText' = plainText input
-    , paddingLength' = paddingLength input
-    }
-  where
-    curveP256 = ECCTypes.getCurveByName ECCTypes.SEC_p256r1
-
 -- | Intermediate encryption output used in tests
 -- All in raw bytes
 data WebPushEncryptionOutput = EncryptionOutput {
@@ -134,16 +100,30 @@ data WebPushEncryptionOutput = EncryptionOutput {
 }
 
 data EncryptError =
-    EncryptCryptoError CryptoError
-  | EncodeApplicationPublicKeyError String
+    EncodeApplicationPublicKeyError String
   | EncryptCipherInitError CryptoError
   | EncryptAeadInitError CryptoError
+  | EncryptInputPublicKeyError CryptoError
+  | EncryptInputApplicationPublicKeyError String
   deriving (Eq, Show)
+
 
 -- | Payload encryption
 -- https://tools.ietf.org/html/draft-ietf-webpush-encryption-04
-webPushEncrypt :: WebPushEncryptionInput' -> Either EncryptError WebPushEncryptionOutput
-webPushEncrypt EncryptionInput'{..} = do -- TODO remove record wildcards
+webPushEncrypt :: WebPushEncryptionInput -> Either EncryptError WebPushEncryptionOutput
+webPushEncrypt EncryptionInput{..} = do -- TODO remove record wildcards
+  userAgentPublicKey <- first EncryptInputPublicKeyError $ ecBytesToPublicKey userAgentPublicKeyBytes
+  applicationServerPublicKey <- first EncryptInputApplicationPublicKeyError . ecPublicKeyToBytes $ ECDH.calculatePublic curveP256 applicationServerPrivateKey
+  let
+    sharedECDHSecret = ECDH.getShared curveP256 applicationServerPrivateKey userAgentPublicKey
+    pseudoRandomKeyCombine = HMAC.hmac authenticationSecret sharedECDHSecret :: HMAC.HMAC SHA256
+    inputKeyingMaterial = HMAC.hmac pseudoRandomKeyCombine (authInfo <> "\x01") :: HMAC.HMAC SHA256
+    pseudoRandomKeyEncryption = HMAC.hmac salt inputKeyingMaterial :: HMAC.HMAC SHA256
+    nonce = BS.pack $ take 12 $ ByteArray.unpack (HMAC.hmac pseudoRandomKeyEncryption (nonceContext <> "\x01") :: HMAC.HMAC SHA256)
+    contentEncryptionKey = BS.take 16 $ ByteArray.convert (HMAC.hmac pseudoRandomKeyEncryption (contentEncryptionKeyContext <> "\x01") :: HMAC.HMAC SHA256)
+    context = "P-256" <> "\x00" <> "\x00" <> "\x41" <> userAgentPublicKeyBytes <> "\x00" <> "\x41" <> applicationServerPublicKey
+    contentEncryptionKeyContext = "Content-Encoding: aesgcm" <> "\x00" <> context
+    nonceContext = "Content-Encoding: nonce" <> "\x00" <> context
   -- aes_gcm is aead (authenticated encryption with associated data)
   -- use cek as the encryption key and nonce as the initialization vector
   aesCipher :: AES128 <- first EncryptCipherInitError . eitherCryptoError $ Cipher.cipherInit contentEncryptionKey
@@ -162,23 +142,12 @@ webPushEncrypt EncryptionInput'{..} = do -- TODO remove record wildcards
   pure $ EncryptionOutput {..}
   where
     -- padding length encoded in 2 bytes, followed by
-    -- padding length times '0' byte, followed by
-    -- message
+    -- padding length times '0' byte, followed by message
     paddedPlainText = LB.toStrict $
-                          (Binary.encode (fromIntegral paddingLength' :: Word16)) <>
-                          (LB.replicate paddingLength' (0 :: Word8)) <>
-                          plainText'
-    sharedECDHSecret = ECDH.getShared curveP256 applicationServerPrivateKey' userAgentPublicKey'
-    inputKeyingMaterial = HMAC.hmac pseudoRandomKeyCombine (authInfo <> "\x01") :: HMAC.HMAC SHA256
-    -- HMAC key derivation (HKDF, here expanded into HMAC steps as specified in web push encryption spec)
-    pseudoRandomKeyCombine = HMAC.hmac authenticationSecret' sharedECDHSecret :: HMAC.HMAC SHA256
+                          (Binary.encode (fromIntegral paddingLength :: Word16)) <>
+                          (LB.replicate paddingLength (0 :: Word8)) <>
+                          plainText
     authInfo = "Content-Encoding: auth" <> "\x00" :: ByteString
-    context = "P-256" <> "\x00" <> "\x00" <> "\x41" <> userAgentPublicKeyBytes' <> "\x00" <> "\x41" <> applicationServerPublicKeyBytes'
-    pseudoRandomKeyEncryption = HMAC.hmac salt' inputKeyingMaterial :: HMAC.HMAC SHA256
-    contentEncryptionKey = BS.take 16 $ ByteArray.convert (HMAC.hmac pseudoRandomKeyEncryption (contentEncryptionKeyContext <> "\x01") :: HMAC.HMAC SHA256)
-    contentEncryptionKeyContext = "Content-Encoding: aesgcm" <> "\x00" <> context
-    nonceContext = "Content-Encoding: nonce" <> "\x00" <> context
-    nonce = BS.pack $ take 12 $ ByteArray.unpack (HMAC.hmac pseudoRandomKeyEncryption (nonceContext <> "\x01") :: HMAC.HMAC SHA256)
     curveP256 = ECCTypes.getCurveByName ECCTypes.SEC_p256r1
 
 -- | Authorization header for a vapid push notification request

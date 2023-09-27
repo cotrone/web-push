@@ -185,8 +185,7 @@ sendPushNotification' vapidKeys httpManager headers pushNotification subscriptio
             , plainText = plainMessage64Encoded
             , paddingLength = padLen
           }
-    input' <- either (throwError . PushInputError) pure $ mkEncryptionInput' encryptionInput
-    encryptionOutput <- either (throwError . PushEncryptError) pure $ webPushEncrypt input'
+    encryptionOutput <- either (throwError . PushEncryptError) pure $ webPushEncrypt encryptionInput
     let vapidPublicKey = ECDSA.toPublicKey $ unVAPIDKeys vapidKeys
         -- TODO could this be cached
         serverPublic = ECDH.calculatePublic (ECC.getCurveByName ECC.SEC_p256r1) $ ecdhServerPrivateKey
@@ -280,7 +279,6 @@ mkPushNotification =
 -- You may want to delete the endpoint from database in this case, or if 'EndpointParseFailed'.
 data PushNotificationError = EndpointParseFailed HttpException -- ^ Endpoint URL could not be parsed
                            | PushNotificationBadHost URI
-                           | PushInputError EncryptInputError
                            | PushEncryptError EncryptError
                            | ApplicationKeyEncodeError String -- ^ Application server key encoding failed
                            | RecepientEndpointNotFound -- ^ The endpoint is no longer recognized by the push service

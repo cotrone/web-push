@@ -157,9 +157,9 @@ appSendPushNotification cfg text = do
     subs = appConfigSubscriptions cfg
 
 toWebPushSubscription :: ExampleSubscription -> Maybe WP.Subscription
-toWebPushSubscription (ExampleSubscription endpoint auth p256dh) = do
-  uri <- parseURI $ T.unpack endpoint
-  pure $ WP.Subscription uri auth p256dh
+toWebPushSubscription sub = do
+  uri <- parseURI $ T.unpack $ subEndpoint sub
+  pure $ WP.Subscription uri (subP256dh sub) (subAuth sub) 
 
 runExampleApp :: Int -- ^ Port to run the application on
               -> AppConfig -- ^ Configuration for the application
