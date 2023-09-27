@@ -5,7 +5,7 @@ description:
     Web Push is a simple protocol for delivery of real-time events
     to user agents using HTTP/2 server push. This can be used to send
     notifications to browsers using the Push API.
-homepage:            https://github.com/sarthakbagaria/web-push#readme
+homepage:            https://github.com/cotrone/web-push#readme
 license:             MIT
 license-file:        LICENSE
 author:              Sarthak Bagaria
@@ -19,19 +19,19 @@ cabal-version:       2.0
 library
   default-language:    Haskell2010
   hs-source-dirs:      src
+  ghc-options:         -Wall
   exposed-modules:     Web.WebPush
                        Web.WebPush.Internal
-  ghc-options:        -Wall -fwarn-tabs -O2
   build-depends:       base >= 4.7 && < 5
                      , aeson >= 2.0 && < 3.0
                      , base64 >= 0.4 && < 0.5
                      , binary >= 0.7.5 && < 0.9
                      , bytestring >= 0.9 && < 0.13
-                     , containers
-                     , crypton >= 0.30
+                     , containers >= 0.6 && < 0.7
+                     , crypton >= 0.30 && < 1.0
                      , http-client >= 0.5.7 && < 0.8
                      , http-types >= 0.8.6 && < 1.0
-                     , lens >= 4.15.1
+                     , lens >= 4.15.1 && < 6.0
                      , memory >= 0.14.5 && < 0.19
                      , mtl >= 2.2 && < 3.0
                      , network-uri >= 2.6 && < 3.0
@@ -44,28 +44,27 @@ library
 Test-Suite web-push-test
   default-language:    Haskell2010
   type:                exitcode-stdio-1.0
+  ghc-options:         -Wall
   hs-source-dirs:      test
   main-is:             Main.hs
   other-modules:       WebPushEncryptionSpec WebPushMock
-  ghc-options:        -Wall -Werror
   build-depends:       base >= 4.7 && < 5
-                     , aeson
-                     , base64
-                     , binary
-                     , bytestring
-                     , hspec
-                     , http-client
-                     , lens
-                     , network-uri
-                     , process
-                     , tasty
-                     , tasty-hspec >= 1.1.3.2
-                     , tasty-hunit
-                     , text
-                     , time
-                     , unordered-containers
+                     , aeson >= 2.0 && < 3.0
+                     , base64 >= 0.4 && < 0.5
+                     , binary >= 0.7.5 && < 0.9
+                     , bytestring >= 0.9 && < 0.13
+                     , hspec >= 2.0 && < 3.0
+                     , http-client >= 0.5.7 && < 0.8
+                     , lens >= 4.15.1 && < 6.0
+                     , network-uri >= 2.6 && < 3.0
+                     , process >= 1.0 && < 2.0
+                     , tasty >= 1.0 && < 2.0
+                     , tasty-hspec >= 1.1.3.2 && < 2.0
+                     , tasty-hunit >= 0.10 && < 0.11
+                     , text >= 0.11 && < 3.0
+                     , time >= 1.0 && < 2
                      , web-push
-                     , wreq
+                     , wreq >= 0.5 && < 0.6
 
 source-repository head
   type:     git
