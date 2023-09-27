@@ -137,9 +137,9 @@ appSendPushNotification cfg text = do
         , "url" JS..= ("http://localhost:3000" :: Text)
         ]
     pushDetails =
-      WP.mkPushNotification -- The subscription details
-        & WP.pushExpireInSeconds .~ 60 * 60 * 12 -- 12 hours
-        & WP.pushMessage .~ message -- The message we created above
+      WP.PushNotification  -- The subscription details
+        (60 * 60 * 12) -- 12 hours
+        message -- The message created above
 
   liftIO $ putStrLn $ "Sending notification to " <> show (Prelude.length subscribtions) <> " subscribers containing message: " <> show text
   

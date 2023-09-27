@@ -42,9 +42,7 @@ testSendMessage =
       step "Sending message through the mock server"
       time <- getCurrentTime
       let 
-          notification = mkPushNotification
-            & pushExpireInSeconds .~ 60 * 60 * 12
-            & pushMessage .~ message
+          notification = PushNotification (60 * 60 * 12) message
           message :: Value
           message = object [
               "title" .= ("Web Push Test" :: Text)

@@ -12,15 +12,11 @@ module Web.WebPush (
 , vapidPublicKeyBytes
 , sendPushNotification
 , sendPushNotifications
-, pushExpireInSeconds
-, pushMessage
-, mkPushNotification
 -- * Types
 , Subscription(..)
 , VapidConfig(..)
-, VAPIDKeys
 , VAPIDKeysMinDetails(..)
-, PushNotification
+, PushNotification(..)
 , PushNotificationCreated(..)
 , PushNotificationError(..)
 , PushP256dh
@@ -32,7 +28,6 @@ import           Web.WebPush.Internal
 import           Control.Exception          (Exception, try)
 import           Control.Exception.Base     (SomeException (..), fromException)
 import           Control.Exception.Safe     (tryAny)
-import           Control.Lens               (Lens, Lens', lens, (^.))
 import           Control.Monad.Except
 import qualified Crypto.PubKey.ECC.DH       as ECDH
 import qualified Crypto.PubKey.ECC.ECDSA    as ECDSA
@@ -53,7 +48,6 @@ import qualified Data.Text.Encoding         as TE
 import qualified Data.Text.Read             as TR
 import           Data.Time.Clock.POSIX      (getPOSIXTime)
 import           Data.Word                  (Word8)
-import           GHC.Int                    (Int64)
 import           Network.HTTP.Client        (HttpException (HttpExceptionRequest),
                                              HttpExceptionContent (StatusCodeException),
                                              Manager, RequestBody (..),
@@ -65,6 +59,18 @@ import           Network.HTTP.Types         (Header, hContentEncoding,
 import           Network.HTTP.Types.Status  (Status (statusCode))
 import           Network.URI
 import           System.Random              (randomRIO)
+
+-- | 3 integers minimally representing a unique VAPID public-private key pair.
+data VAPIDKeysMinDetails = VAPIDKeysMinDetails { privateNumber :: Integer
+                                               , publicCoordX  :: Integer
+                                               , publicCoordY  :: Integer
+                                               } deriving (Show)
+
+-- | Configuration for VAPID server identification
+data VapidConfig = VapidConfig {
+  vapidConfigContact :: T.Text -- ^ Contact information for the application server, either a `mailto:` URI or an HTTPS URL
+, vapidConfigKey :: VAPIDKeysMinDetails -- ^ Keypair used to sign the VAPID identification
+}
 
 -- | Generate the 3 integers minimally representing a unique pair of public and private keys.
 --
@@ -82,8 +88,8 @@ generateVAPIDKeys = do
         , publicCoordY = pubY
       }
 
--- | Pass the VAPID public key bytes to browser when subscribing to push notifications.
--- Generate the application server key in a browser using:
+-- | Pass the VAPID public key bytes as `applicationServerKey` when calling subscribe
+-- on the `PushManager` object on a registered service worker
 --
 -- > applicationServerKey = new Uint8Array( #{toJSON vapidPublicKeyBytes} )
 vapidPublicKeyBytes :: VAPIDKeysMinDetails -> [Word8]
@@ -92,23 +98,13 @@ vapidPublicKeyBytes keys = BS.unpack $ ecPublicKeyToBytes' (x, y)
     x = publicCoordX keys
     y = publicCoordY keys
 
--- | Result of creating a push notification
+-- | Result of a successful push notification request
 data PushNotificationCreated = PushNotificationCreated {
   pushNotificationCreatedTTL :: Maybe Int -- ^ Optional TTL of the notification
 } deriving (Eq, Ord, Show)
 
--- | 3 integers minimally representing a unique VAPID public-private key pair.
-data VAPIDKeysMinDetails = VAPIDKeysMinDetails { privateNumber :: Integer
-                                               , publicCoordX  :: Integer
-                                               , publicCoordY  :: Integer
-                                               } deriving (Show)
-
--- | 
-data VapidConfig = VapidConfig {
-  vapidConfigContact :: T.Text
-, vapidConfigKey :: VAPIDKeysMinDetails
-}
-
+-- |Send a push notification to multiple subscribers
+-- similar to `sendPushNotification` but shares VAPID keys across multiple requests
 sendPushNotifications :: (MonadIO m, A.ToJSON msg, MonadRandom m)
                       => Manager
                       -> VapidConfig
@@ -120,7 +116,7 @@ sendPushNotifications httpManager vapidConfig pushNotification subscriptions = d
     time <- liftIO getPOSIXTime
     let serverIdentification = ServerIdentification {
               serverIdentificationAudience = host
-            , serverIdentificationExpiration = round time + fromIntegral (pushNotification ^. pushExpireInSeconds)
+            , serverIdentificationExpiration = round time + fromIntegral (pnExpireInSeconds pushNotification)
             , serverIdentificationSubject = vapidConfigContact vapidConfig
           }
     headers <- hostHeaders vapidKeys serverIdentification
@@ -135,7 +131,7 @@ sendPushNotifications httpManager vapidConfig pushNotification subscriptions = d
     subscriptionsMap =
       Map.fromListWith (<>) $ catMaybes ((\sub -> (,[sub]) <$> uriHost (subscriptionEndpoint sub)) <$> subscriptions)
 
--- |Send a Push Message. Read the message in Service Worker notification handler in browser:
+-- | Send a Push Message. Read the message in Service Worker notification handler in browser:
 --
 -- > self.addEventListener('push', function(event){ console.log(event.data.json()); });
 sendPushNotification :: (MonadIO m, A.ToJSON msg, MonadRandom m)
@@ -151,7 +147,7 @@ sendPushNotification httpManager vapidConfig pushNotification subscription =
       time <- liftIO getPOSIXTime
       let serverIdentification = ServerIdentification {
                 serverIdentificationAudience = host
-              , serverIdentificationExpiration = round time + fromIntegral (pushNotification ^. pushExpireInSeconds)
+              , serverIdentificationExpiration = round time + fromIntegral (pnExpireInSeconds pushNotification)
               , serverIdentificationSubject = vapidConfigContact vapidConfig
             }
       headers <- hostHeaders vapidKeys serverIdentification
@@ -190,7 +186,7 @@ sendPushNotification' vapidKeys httpManager headers pushNotification subscriptio
         -- TODO could this be cached
         serverPublic = ECDH.calculatePublic (ECC.getCurveByName ECC.SEC_p256r1) $ ecdhServerPrivateKey
     cryptoKeyHeaderContents <- liftEither $ first ApplicationKeyEncodeError $ cryptoKeyHeader vapidPublicKey serverPublic
-    let postHeaders = headers <> [   ("TTL", C8.pack $ show $ pushNotification ^. pushExpireInSeconds)
+    let postHeaders = headers <> [   ("TTL", C8.pack $ show $ pnExpireInSeconds pushNotification)
                         , (hContentType, "application/octet-stream")
                         , ("Crypto-Key", cryptoKeyHeaderContents)
                         , (hContentEncoding, "aesgcm")
@@ -239,40 +235,23 @@ sendPushNotification' vapidKeys httpManager headers pushNotification subscriptio
     subscriptionPublicKeyBytes = B64.URL.decodeBase64Lenient . TE.encodeUtf8 $ subscriptionP256dh subscription
     -- encode the message to a safe representation like base64URL before sending it to encryption algorithms
     -- decode the message through service workers on browsers before trying to read the JSON
-    plainMessage64Encoded = A.encode $ pushNotification ^. pushMessage
+    plainMessage64Encoded = A.encode $ pnMessage pushNotification
 
 type PushP256dh = T.Text
 type PushAuth = T.Text
 
+-- | Subscription information for a push notification
 data Subscription = Subscription {
   subscriptionEndpoint :: URI -- ^ Endpoint URI to remote push service
 , subscriptionP256dh :: PushP256dh -- ^ Public key of the client
 , subscriptionAuth :: PushAuth -- ^ Authentication secret of the client
 } deriving (Eq, Ord, Show)
 
--- | Web push subscription and message details. Use 'mkPushNotification' to construct push notification.
+-- | Web push notification expiration and message to send
 data PushNotification msg = PushNotification {
-  _pnExpireInSeconds :: Int64
-, _pnMessage :: msg
-}
-
-pushExpireInSeconds :: Lens' (PushNotification msg) Int64
-pushExpireInSeconds = lens _pnExpireInSeconds (\d v -> d {_pnExpireInSeconds = v})
-
-pushMessage :: (A.ToJSON msg) => Lens (PushNotification a) (PushNotification msg) a msg
-pushMessage = lens _pnMessage (\d v -> d {_pnMessage = v})
-
--- | Constuct a push notification.
---
--- 'PushEndpoint', 'PushP256dh' and 'PushAuth' should be obtained from push subscription in client's browser.
--- Push message can be set through 'pushMessage'; text and json messages are usually supported by browsers.
--- 'pushSenderEmail' and 'pushExpireInSeconds' can be used to set additional details.
-mkPushNotification :: PushNotification ()
-mkPushNotification =
-    PushNotification {
-         _pnExpireInSeconds = 3600
-       , _pnMessage = ()
-    }
+  pnExpireInSeconds :: Int -- ^ Expiration time in seconds
+, pnMessage :: msg -- ^ Message to send
+} deriving (Eq, Ord, Show)
 
 -- | 'RecepientEndpointNotFound' comes up when the endpoint is no longer recognized by the push service.
 -- This may happen if the user has cancelled the push subscription, and hence deleted the endpoint.
