@@ -34,6 +34,7 @@ import qualified Web.WebPush                 as WP
 import           Templates
 import qualified Web.WebPush as WP
 import qualified Web.WebPush as WP
+import Web.WebPush (vapidPublicKey)
 
 -- | Form for sending a push notification, just the text to send
 newtype PushNotificationForm = PushNotificationForm { pushNotificationText :: Text }
@@ -172,7 +173,7 @@ initInMemoryConfig :: IO AppConfig
 initInMemoryConfig = do
   vapidKeys <- either fail pure =<< WP.generateVAPIDKeys
   subscriptions <- newTVarIO mempty
-  let Right keyBytes = WP.vapidPublicKeyBytes vapidKeys
+  let Right keyBytes = WP.vapidPublicKeyBytes $ WP.vapidPublicKey vapidKeys
   manager <- HTTP.newManager HTTP.tlsManagerSettings
   pure $ AppConfig vapidKeys keyBytes manager subscriptions (pure ())
 
@@ -180,7 +181,7 @@ initPersistentConfig :: IO AppConfig
 initPersistentConfig = do
   vapidKeys <- initPersistentKeys
   subscriptions <- initPersistentSubscriptions
-  let Right keyBytes = WP.vapidPublicKeyBytes vapidKeys
+  let Right keyBytes = WP.vapidPublicKeyBytes $ WP.vapidPublicKey vapidKeys
   manager <- HTTP.newManager HTTP.tlsManagerSettings
   pure $ AppConfig vapidKeys keyBytes manager subscriptions (writeSubscriptions subscriptions)
   where

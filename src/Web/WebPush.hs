@@ -144,10 +144,9 @@ sendPushNotification' vapidKeys httpManager headers pushNotification subscriptio
             , paddingLength = padLen
           }
     encryptionOutput <- either (throwError . PushEncryptError) pure $ webPushEncrypt encryptionInput
-    let vapidPublicKey = ECDSA.toPublicKey $ unVAPIDKeys vapidKeys
-        -- TODO could this be cached
-        serverPublic = ECDH.calculatePublic (ECC.getCurveByName ECC.SEC_p256r1) $ ecdhServerPrivateKey
-    cryptoKeyHeaderContents <- liftEither $ first ApplicationKeyEncodeError $ cryptoKeyHeader vapidPublicKey serverPublic
+    -- TODO could this be cached
+    let serverPublic = ECDH.calculatePublic (ECC.getCurveByName ECC.SEC_p256r1) $ ecdhServerPrivateKey
+    cryptoKeyHeaderContents <- liftEither $ first ApplicationKeyEncodeError $ cryptoKeyHeader (vapidPublicKey vapidKeys) serverPublic
     let postHeaders = headers <> [   ("TTL", C8.pack $ show $ pnExpireInSeconds pushNotification)
                         , (hContentType, "application/octet-stream")
                         , ("Crypto-Key", cryptoKeyHeaderContents)

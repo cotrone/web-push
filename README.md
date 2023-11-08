@@ -22,6 +22,20 @@ Then access `localhost:3000` from a browser
 
 For production use, store a set of VAPID keys securely and use them for all push notification subscriptions and messages; public key will have to be exposed to client's browser when subscribing to push notifications, but private key must be kept secret and used when generating push notifications on the server. If VAPID keys are re-generated, all push notifications will require re-subscriptions. Also save the latest subscription details such as endpoint from user's browser session securely in the database and use them to send push notifications to the user later.
 
+## Generating Keys
+
+Generating VAPID keys should be done with openssl.
+
+To generate the private key:
+```
+openssl ecparam -name prime256v1 -genkey -noout -out vapid_private.pem
+```
+
+to calculate the public key from the private key:
+```
+openssl ec -in vapid_private.pem -pubout -out vapid_public.pem
+```
+
 ## Build
 
 The library builds and tests run with both cabal and stack.

@@ -32,7 +32,7 @@ testSendMessage =
       _ <- webPushStatus
 
       keys <- either fail pure =<< generateVAPIDKeys
-      publicKeyBytes <- either fail pure $ vapidPublicKeyBytes keys
+      publicKeyBytes <- either fail pure $ vapidPublicKeyBytes $ vapidPublicKey keys
       let subscriptionOptions = SubscribeOptions True $ BS.pack publicKeyBytes
 
       step "Creating a test subscription to the mock server"

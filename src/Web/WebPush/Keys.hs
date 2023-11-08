@@ -38,6 +38,10 @@ newtype VAPIDKeys = VAPIDKeys {
   unVAPIDKeys :: ECDSA.KeyPair
 } deriving (Show)
 
+-- | Get the public key from the VAPID keys
+vapidPublicKey :: VAPIDKeys -> ECDSA.PublicKey
+vapidPublicKey = ECDSA.toPublicKey . unVAPIDKeys
+
 -- | Errors from reading the VAPID keys from files
 data VAPIDKeysError =
     VAPIDKeysPublicKeyError PublicKeyError -- ^ Error reading the public key
@@ -166,8 +170,8 @@ generateVAPIDKeys = do
 -- on the `PushManager` object on a registered service worker
 --
 -- > applicationServerKey = new Uint8Array( #{toJSON vapidPublicKeyBytes} )
-vapidPublicKeyBytes :: VAPIDKeys -> Either String [Word8]
+vapidPublicKeyBytes :: ECDSA.PublicKey -> Either String [Word8]
 vapidPublicKeyBytes key =
-  case ECDSA.public_q $ ECDSA.toPublicKey $ unVAPIDKeys key of
+  case ECDSA.public_q key of
     ECC.PointO -> Left "Invalid public key generated, public_q is the point at infinity"
     ECC.Point x y -> Right $ BS.unpack $ ecPublicKeyToBytes' (x, y)
