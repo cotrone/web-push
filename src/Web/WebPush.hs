@@ -8,30 +8,27 @@
 
 module Web.WebPush (
 -- * Functions
-  generateVAPIDKeys
-, vapidPublicKeyBytes
-, sendPushNotification
+  sendPushNotification
 , sendPushNotifications
 -- * Types
 , Subscription(..)
 , VapidConfig(..)
-, VAPIDKeysMinDetails(..)
 , PushNotification(..)
 , PushNotificationCreated(..)
 , PushNotificationError(..)
 , PushP256dh
 , PushAuth
+, module Web.WebPush.Keys
 ) where
 
 import           Web.WebPush.Internal
+import           Web.WebPush.Keys
 
-import           Control.Exception          (Exception, try)
-import           Control.Exception.Base     (SomeException (..), fromException)
+import           Control.Exception
 import           Control.Exception.Safe     (tryAny)
 import           Control.Monad.Except
 import qualified Crypto.PubKey.ECC.DH       as ECDH
 import qualified Crypto.PubKey.ECC.ECDSA    as ECDSA
-import qualified Crypto.PubKey.ECC.Generate as ECC
 import qualified Crypto.PubKey.ECC.Types    as ECC
 import           Crypto.Random              (MonadRandom (getRandomBytes))
 import qualified Data.Aeson                 as A
@@ -47,7 +44,6 @@ import qualified Data.Text                  as T
 import qualified Data.Text.Encoding         as TE
 import qualified Data.Text.Read             as TR
 import           Data.Time.Clock.POSIX      (getPOSIXTime)
-import           Data.Word                  (Word8)
 import           Network.HTTP.Client        (HttpException (HttpExceptionRequest),
                                              HttpExceptionContent (StatusCodeException),
                                              Manager, RequestBody (..),
@@ -60,43 +56,11 @@ import           Network.HTTP.Types.Status  (Status (statusCode))
 import           Network.URI
 import           System.Random              (randomRIO)
 
--- | 3 integers minimally representing a unique VAPID public-private key pair.
-data VAPIDKeysMinDetails = VAPIDKeysMinDetails { privateNumber :: Integer
-                                               , publicCoordX  :: Integer
-                                               , publicCoordY  :: Integer
-                                               } deriving (Show)
-
 -- | Configuration for VAPID server identification
 data VapidConfig = VapidConfig {
   vapidConfigContact :: T.Text -- ^ Contact information for the application server, either a `mailto:` URI or an HTTPS URL
-, vapidConfigKey :: VAPIDKeysMinDetails -- ^ Keypair used to sign the VAPID identification
+, vapidConfigKeys :: VAPIDKeys -- ^ Keypair used to sign the VAPID identification
 }
-
--- | Generate the 3 integers minimally representing a unique pair of public and private keys.
---
--- Store them securely and use them across multiple push notification requests.
-generateVAPIDKeys :: MonadRandom m => m (Either String VAPIDKeysMinDetails)
-generateVAPIDKeys = do
-  -- SEC_p256r1 is the NIST P-256
-  (pubKey, privKey) <- ECC.generate $ ECC.getCurveByName ECC.SEC_p256r1
-  case ECDSA.public_q pubKey of
-    ECC.PointO -> pure $  Left "Invalid public key generated, public_q is the point at infinity"
-    ECC.Point pubX pubY ->
-      pure $ Right VAPIDKeysMinDetails {
-          privateNumber = ECDSA.private_d privKey
-        , publicCoordX = pubX
-        , publicCoordY = pubY
-      }
-
--- | Pass the VAPID public key bytes as `applicationServerKey` when calling subscribe
--- on the `PushManager` object on a registered service worker
---
--- > applicationServerKey = new Uint8Array( #{toJSON vapidPublicKeyBytes} )
-vapidPublicKeyBytes :: VAPIDKeysMinDetails -> [Word8]
-vapidPublicKeyBytes keys = BS.unpack $ ecPublicKeyToBytes' (x, y)
-  where
-    x = publicCoordX keys
-    y = publicCoordY keys
 
 -- | Result of a successful push notification request
 data PushNotificationCreated = PushNotificationCreated {
@@ -119,14 +83,13 @@ sendPushNotifications httpManager vapidConfig pushNotification subscriptions = d
             , serverIdentificationExpiration = round time + fromIntegral (pnExpireInSeconds pushNotification)
             , serverIdentificationSubject = vapidConfigContact vapidConfig
           }
-    headers <- hostHeaders vapidKeys serverIdentification
+    headers <- hostHeaders privateKey serverIdentification
     forM hostSubscriptions $ \subscription -> do
       e <- sendPushNotification' vapidKeys httpManager headers pushNotification subscription
       pure (subscription, e)
   where
-    vapidKeysMin = vapidConfigKey vapidConfig
-    vapidKeys = VAPIDKeys $ ECDSA.KeyPair (ECC.getCurveByName ECC.SEC_p256r1) (vapidKeyPoint) (privateNumber vapidKeysMin)
-    vapidKeyPoint = ECC.Point (publicCoordX vapidKeysMin) (publicCoordY vapidKeysMin)
+    privateKey = ECDSA.toPrivateKey $ unVAPIDKeys vapidKeys
+    vapidKeys = vapidConfigKeys vapidConfig
     -- Group subscriptions by host
     subscriptionsMap =
       Map.fromListWith (<>) $ catMaybes ((\sub -> (,[sub]) <$> uriHost (subscriptionEndpoint sub)) <$> subscriptions)
@@ -150,12 +113,11 @@ sendPushNotification httpManager vapidConfig pushNotification subscription =
               , serverIdentificationExpiration = round time + fromIntegral (pnExpireInSeconds pushNotification)
               , serverIdentificationSubject = vapidConfigContact vapidConfig
             }
-      headers <- hostHeaders vapidKeys serverIdentification
+      headers <- hostHeaders privateKey serverIdentification
       sendPushNotification' vapidKeys httpManager headers pushNotification subscription
   where
-    vapidKeysMin = vapidConfigKey vapidConfig
-    vapidKeys = VAPIDKeys $ ECDSA.KeyPair (ECC.getCurveByName ECC.SEC_p256r1) (vapidKeyPoint) (privateNumber vapidKeysMin)
-    vapidKeyPoint = ECC.Point (publicCoordX vapidKeysMin) (publicCoordY vapidKeysMin)
+    privateKey = ECDSA.toPrivateKey $ unVAPIDKeys vapidKeys
+    vapidKeys = vapidConfigKeys vapidConfig
 
 -- | Internal function to send a single push notification
 sendPushNotification' :: (MonadIO m, A.ToJSON msg, MonadRandom m)

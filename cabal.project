@@ -1,1 +1,4 @@
 packages: . ./web-push-example
+
+package cryptostore
+  flags: +use_crypton

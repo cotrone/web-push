@@ -32,6 +32,8 @@ import           Web.FormUrlEncoded
 import qualified Web.WebPush                 as WP
 
 import           Templates
+import qualified Web.WebPush as WP
+import qualified Web.WebPush as WP
 
 -- | Form for sending a push notification, just the text to send
 newtype PushNotificationForm = PushNotificationForm { pushNotificationText :: Text }
@@ -74,7 +76,7 @@ type API =
 
 -- | Configuration for the web server
 data AppConfig = AppConfig
-  { appConfigVAPIDKeys            :: WP.VAPIDKeysMinDetails -- ^ Public and private keys for web-push
+  { appConfigVAPIDKeys            :: WP.VAPIDKeys -- ^ Public and private keys for web-push
   , appConfigVAPIDKeyBytes        :: [Word8] -- ^ Public key for web-push as bytes, passed into the index.js.mustache template
   , appConfigManager              :: HTTP.Manager -- ^ HTTP manager for sending push notifications
   , appConfigSubscriptions        :: TVar (Set ExampleSubscription) -- ^ Active subscriptions to push notifications
@@ -170,7 +172,7 @@ initInMemoryConfig :: IO AppConfig
 initInMemoryConfig = do
   vapidKeys <- either fail pure =<< WP.generateVAPIDKeys
   subscriptions <- newTVarIO mempty
-  let keyBytes = WP.vapidPublicKeyBytes vapidKeys
+  let Right keyBytes = WP.vapidPublicKeyBytes vapidKeys
   manager <- HTTP.newManager HTTP.tlsManagerSettings
   pure $ AppConfig vapidKeys keyBytes manager subscriptions (pure ())
 
@@ -178,24 +180,24 @@ initPersistentConfig :: IO AppConfig
 initPersistentConfig = do
   vapidKeys <- initPersistentKeys
   subscriptions <- initPersistentSubscriptions
-  let keyBytes = WP.vapidPublicKeyBytes vapidKeys
+  let Right keyBytes = WP.vapidPublicKeyBytes vapidKeys
   manager <- HTTP.newManager HTTP.tlsManagerSettings
   pure $ AppConfig vapidKeys keyBytes manager subscriptions (writeSubscriptions subscriptions)
   where
-    initPersistentKeys :: IO WP.VAPIDKeysMinDetails
+    initPersistentKeys :: IO WP.VAPIDKeys
     initPersistentKeys = do
-      keysExist <- doesFileExist fp
-      if keysExist
-        then (maybe (fail "Unable to read keys") (pure . decodeKeys)) =<< JS.decodeFileStrict fp
+      privExists <- doesFileExist privKeyFp
+      pubExists <- doesFileExist pubKeyFp
+      if privExists || pubExists
+        then (either (fail . ("Unable to read keys: " <>) . show) pure) =<< WP.readVapidKeys pubKeyFp privKeyFp
         else do
           putStrLn "Generating keys"
           keys <- either fail pure =<< WP.generateVAPIDKeys
-          JS.encodeFile fp $ encodeKeys keys
+          WP.writeVAPIDKeys pubKeyFp privKeyFp keys
           pure keys
       where
-        fp = "vapid-keys.json"
-        encodeKeys (WP.VAPIDKeysMinDetails n x y) = (n , x , y)
-        decodeKeys (n, x, y) = WP.VAPIDKeysMinDetails n x y
+        pubKeyFp = "vapid-public-key.pem"
+        privKeyFp = "vapid-private-key.pem"
     -- Initialize subscriptions from a file if they exist
     initPersistentSubscriptions :: IO (TVar (Set ExampleSubscription))
     initPersistentSubscriptions = do

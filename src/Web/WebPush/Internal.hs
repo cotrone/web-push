@@ -3,6 +3,7 @@
 
 module Web.WebPush.Internal where
 
+import           Control.Monad.IO.Class
 import           Crypto.Cipher.AES               (AES128)
 import qualified Crypto.Cipher.Types             as Cipher
 import qualified Crypto.ECC
@@ -28,16 +29,11 @@ import qualified Data.ByteString.Lazy            as LB
 import qualified Data.ByteString.Lazy.Base64.URL as B64.URL
 import           Data.Data
 import           Data.Text                       (Text)
+import qualified Data.Text                       as T
 import           Data.Word                       (Word16, Word64, Word8)
 import           GHC.Int                         (Int64)
-import qualified Data.Text as T
-import Network.URI
-import Control.Monad.IO.Class
-import Network.HTTP.Types
-
-newtype VAPIDKeys = VAPIDKeys {
-  unVAPIDKeys :: ECDSA.KeyPair
-}
+import           Network.HTTP.Types
+import           Network.URI
 
 -- | Server identification for a single host, used to identify the server to the remote push server
 data ServerIdentification = ServerIdentification {
@@ -58,11 +54,11 @@ instance A.ToJSON ServerIdentification where
 -- Manual implementation without using the JWT libraries.
 -- Not using jose library. Check the below link for reason:
 -- https://github.com/sarthakbagaria/web-push/pull/1#issuecomment-471254455
-webPushJWT :: MonadRandom m => VAPIDKeys -> ServerIdentification -> m BS.ByteString
-webPushJWT vapidKeys payload = do
+webPushJWT :: MonadRandom m => ECDSA.PrivateKey -> ServerIdentification -> m BS.ByteString
+webPushJWT privateKey payload = do
   -- JWT only accepts SHA256 hash with ECDSA for ES256 signed token
   -- ECDSA signing vulnerable to timing attacks
-  signature <- ECDSA.sign (ECDSA.toPrivateKey $ unVAPIDKeys vapidKeys) SHA256 jwtMessage
+  signature <- ECDSA.sign privateKey SHA256 jwtMessage
   pure $ jwtMessage <> "." <> jwtSignature signature
   where
     jwtSignature (ECDSA.Signature signR signS) =
@@ -153,11 +149,11 @@ webPushEncrypt EncryptionInput{..} = do -- TODO remove record wildcards
 -- | Authorization header for a vapid push notification request
 -- this is shared between all push notifications sent to a single push service host
 hostHeaders :: (MonadIO m, MonadRandom m)
-            => VAPIDKeys
+            => ECDSA.PrivateKey
             -> ServerIdentification
             -> m [Header]
-hostHeaders vapidKeys serverIdentification = do
-  jwt <- webPushJWT vapidKeys serverIdentification
+hostHeaders privateKey serverIdentification = do
+  jwt <- webPushJWT privateKey serverIdentification
   pure [(hAuthorization, "WebPush " <> jwt)]
 
 -- | The host for URI including scheme and port
