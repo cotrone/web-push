@@ -32,12 +32,10 @@ library
                      , bytestring >= 0.9 && < 0.13
                      , containers >= 0.6 && < 0.7
                      , crypton >= 0.30 && < 1.0
-                     , cryptostore >= 0.3 && < 0.4
                      , crypton-x509 >= 1.7 && < 1.8
-                     , crypton-x509-store
+                     , crypton-x509-store >= 1.6 && < 1.7
                      , http-client >= 0.5.7 && < 0.8
                      , http-types >= 0.8.6 && < 1.0
-                     , lens >= 4.15.1 && < 6.0
                      , memory >= 0.14.5 && < 0.19
                      , mtl >= 2.2 && < 3.0
                      , network-uri >= 2.6 && < 3.0
@@ -46,7 +44,6 @@ library
                      , safe-exceptions >= 0.1.7 && < 0.2
                      , text >= 0.11 && < 3.0
                      , time >= 1.0 && < 2
-                     , transformers >= 0.5.2.0 && < 0.7
 
 Test-Suite web-push-test
   default-language:    Haskell2010
