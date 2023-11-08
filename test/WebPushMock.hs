@@ -53,7 +53,7 @@ testSendMessage =
             ]
           encodedMessage = TE.decodeUtf8 $ BSL.toStrict $ encode message
       endpointManager <- HTTP.newManager HTTP.defaultManagerSettings
-      either (assertFailure . show) (const (pure ())) =<< sendPushNotification endpointManager (VapidConfig "mailto:test@example.com" keys) notification (subscriptionResult subscription)
+      either (assertFailure . show) (const (pure ())) =<< sendPushNotification endpointManager (VAPIDConfig "mailto:test@example.com" keys) notification (subscriptionResult subscription)
 
       step "Getting notifications"
       notificationsResponse <- webPushGetNotificationsFor (clientHash subscription)

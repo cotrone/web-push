@@ -147,7 +147,7 @@ appSendPushNotification cfg text = do
   liftIO $ putStrLn $ "Sending notification to " <> show (Prelude.length subscribtions) <> " subscribers containing message: " <> show text
   
   -- Send all notifications
-  let vapidConfig = WP.VapidConfig "mailto:test@example.com" keys
+  let vapidConfig = WP.VAPIDConfig "mailto:test@example.com" keys
   liftIO $ putStrLn "Sending batch notifications "
   results <- WP.sendPushNotifications manager vapidConfig pushDetails $ catMaybes (toWebPushSubscription <$> Set.toList subscribtions)
   forM_ results $ \res -> do
@@ -189,7 +189,7 @@ initPersistentConfig = do
     initPersistentKeys = do
       privExists <- doesFileExist privKeyFp
       pubExists <- doesFileExist pubKeyFp
-      if privExists || pubExists
+      if privExists && pubExists
         then (either (fail . ("Unable to read keys: " <>) . show) pure) =<< WP.readVapidKeys pubKeyFp privKeyFp
         else do
           putStrLn "Generating keys"

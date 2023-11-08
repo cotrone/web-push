@@ -12,7 +12,7 @@ module Web.WebPush (
 , sendPushNotifications
 -- * Types
 , Subscription(..)
-, VapidConfig(..)
+, VAPIDConfig(..)
 , PushNotification(..)
 , PushNotificationCreated(..)
 , PushNotificationError(..)
@@ -57,7 +57,7 @@ import           Network.URI
 import           System.Random              (randomRIO)
 
 -- | Configuration for VAPID server identification
-data VapidConfig = VapidConfig {
+data VAPIDConfig = VAPIDConfig {
   vapidConfigContact :: T.Text -- ^ Contact information for the application server, either a `mailto:` URI or an HTTPS URL
 , vapidConfigKeys :: VAPIDKeys -- ^ Keypair used to sign the VAPID identification
 }
@@ -71,7 +71,7 @@ data PushNotificationCreated = PushNotificationCreated {
 -- similar to `sendPushNotification` but shares VAPID keys across multiple requests
 sendPushNotifications :: (MonadIO m, A.ToJSON msg, MonadRandom m)
                       => Manager
-                      -> VapidConfig
+                      -> VAPIDConfig
                       -> PushNotification msg
                       -> [Subscription]
                       -> m [(Subscription, Either PushNotificationError PushNotificationCreated)]
@@ -99,7 +99,7 @@ sendPushNotifications httpManager vapidConfig pushNotification subscriptions = d
 -- > self.addEventListener('push', function(event){ console.log(event.data.json()); });
 sendPushNotification :: (MonadIO m, A.ToJSON msg, MonadRandom m)
                       => Manager
-                      -> VapidConfig
+                      -> VAPIDConfig
                       -> PushNotification msg
                       -> Subscription
                       -> m (Either PushNotificationError PushNotificationCreated)
