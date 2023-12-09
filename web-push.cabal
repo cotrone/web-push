@@ -24,7 +24,7 @@ library
                        Web.WebPush.Keys
                        Web.WebPush.Internal
   build-depends:       base >= 4.7 && < 5
-                     , aeson >= 2.0 && < 2.2
+                     , aeson >= 2.0 && < 3.0
                      , asn1-encoding >= 0.9 && < 0.10
                      , asn1-types >= 0.3 && < 0.4
                      , base64 >= 0.4 && < 0.5
@@ -54,7 +54,7 @@ Test-Suite web-push-test
   main-is:             Main.hs
   other-modules:       WebPushEncryptionSpec WebPushMock
   build-depends:       base >= 4.7 && < 5
-                     , aeson >= 2.0 && < 2.2
+                     , aeson >= 2.0 && < 3.0
                      , base64 >= 0.4 && < 0.5
                      , binary >= 0.7.5 && < 0.9
                      , bytestring >= 0.9 && < 0.13
