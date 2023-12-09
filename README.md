@@ -28,12 +28,12 @@ Generating VAPID keys should be done with openssl.
 
 To generate the private key:
 ```
-openssl ecparam -name prime256v1 -genkey -noout -out vapid_private.pem
+openssl ecparam -name prime256v1 -genkey -noout -out vapid-private.pem
 ```
 
 to calculate the public key from the private key:
 ```
-openssl ec -in vapid_private.pem -pubout -out vapid_public.pem
+openssl ec -in vapid-private.pem -pubout -out vapid-public.pem
 ```
 
 ## Build

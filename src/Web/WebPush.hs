@@ -32,6 +32,7 @@ import qualified Crypto.PubKey.ECC.ECDSA    as ECDSA
 import qualified Crypto.PubKey.ECC.Types    as ECC
 import           Crypto.Random              (MonadRandom (getRandomBytes))
 import qualified Data.Aeson                 as A
+import qualified Data.Aeson.Encoding        as AE
 import           Data.Bifunctor
 import qualified Data.ByteString            as BS
 import qualified Data.ByteString.Base64.URL as B64.URL
@@ -54,7 +55,10 @@ import           Network.HTTP.Types         (Header, hContentEncoding,
                                              hContentType)
 import           Network.HTTP.Types.Status  (Status (statusCode))
 import           Network.URI
+import qualified Network.URI                as URI
 import           System.Random              (randomRIO)
+import           Web.FormUrlEncoded
+import           Web.HttpApiData
 
 -- | Configuration for VAPID server identification
 data VAPIDConfig = VAPIDConfig {
@@ -207,6 +211,55 @@ data Subscription = Subscription {
 , subscriptionP256dh :: PushP256dh -- ^ Public key of the client
 , subscriptionAuth :: PushAuth -- ^ Authentication secret of the client
 } deriving (Eq, Ord, Show)
+
+instance A.FromJSON Subscription where
+  parseJSON = A.withObject "Subscription" $ \obj -> do
+    uri <- unWPURI <$> obj A..: "endpoint"
+    p256 <- obj A..: "p256dh"
+    auth' <- obj A..: "auth"
+    pure $ Subscription {
+        subscriptionEndpoint = uri
+      , subscriptionP256dh = p256
+      , subscriptionAuth = auth'
+      }
+
+instance A.ToJSON Subscription where
+  toJSON sub = A.object [
+      "endpoint" A..= WPURI (subscriptionEndpoint sub)
+    , "p256dh" A..= subscriptionP256dh sub
+    , "auth" A..= subscriptionAuth sub
+    ]
+
+-- | Wrapper around URI to parse and serialize URI in JSON and URL encoded forms
+-- Aeson added a URI instance in 2.2.0.0 but webdriver-w3c doesn't compile with that version
+-- see https://github.com/nbloomf/webdriver-w3c/pull/64
+newtype WPURI = WPURI {
+  unWPURI :: URI
+} deriving (Eq, Ord, Show)
+
+instance FromHttpApiData WPURI where
+  parseUrlPiece = maybe (Left "Invalid URI") (Right . WPURI) . parseURI . T.unpack
+
+instance A.FromJSON WPURI where
+  parseJSON = A.withText "URI" $ \t ->
+    case URI.parseURI (T.unpack t) of
+      Nothing -> fail "Invalid URI"
+      Just x  -> pure $ WPURI x
+
+instance A.ToJSON WPURI where
+    toJSON uri = A.toJSON (URI.uriToString id (unWPURI uri) "")
+    toEncoding uri = AE.string (URI.uriToString id (unWPURI uri) "")
+
+instance FromForm Subscription where
+  fromForm form = do
+    uri <- unWPURI <$> parseUnique "endpoint" form
+    p256 <- parseUnique "p256dh" form 
+    auth' <- parseUnique "auth" form
+    pure $ Subscription {
+        subscriptionEndpoint = uri
+      , subscriptionP256dh = p256
+      , subscriptionAuth = auth'
+      }
 
 -- | Web push notification expiration and message to send
 data PushNotification msg = PushNotification {

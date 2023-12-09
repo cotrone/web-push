@@ -197,8 +197,8 @@ initPersistentConfig = do
           WP.writeVAPIDKeys pubKeyFp privKeyFp keys
           pure keys
       where
-        pubKeyFp = "vapid-public-key.pem"
-        privKeyFp = "vapid-private-key.pem"
+        pubKeyFp = "vapid-public.pem"
+        privKeyFp = "vapid-private.pem"
     -- Initialize subscriptions from a file if they exist
     initPersistentSubscriptions :: IO (TVar (Set ExampleSubscription))
     initPersistentSubscriptions = do
