@@ -59,6 +59,7 @@ import qualified Network.URI                as URI
 import           System.Random              (randomRIO)
 import           Web.FormUrlEncoded
 import           Web.HttpApiData
+import qualified Data.HashMap.Strict as HM
 
 -- | Configuration for VAPID server identification
 data VAPIDConfig = VAPIDConfig {
@@ -260,6 +261,13 @@ instance FromForm Subscription where
       , subscriptionP256dh = p256
       , subscriptionAuth = auth'
       }
+  
+instance ToForm Subscription where
+  toForm sub = Form $ HM.fromList [
+      ("endpoint", [T.pack $ URI.uriToString id (subscriptionEndpoint sub) ""])
+    , ("p256dh", [subscriptionP256dh sub])
+    , ("auth", [subscriptionAuth sub])
+    ]
 
 -- | Web push notification expiration and message to send
 data PushNotification msg = PushNotification {

@@ -128,8 +128,8 @@ webPushEncrypt EncryptionInput{..} = do -- TODO remove record wildcards
       -- tag length 16 bytes (maximum), anything less than 16 bytes may not be secure enough
       -- spec says final encrypted size is 16 bits longer than the padded text
       -- NOTE: the final encrypted message must be sent as raw binary data 
-      authTag = ByteArray.convert $ Cipher.unAuthTag authTagBytes
       (authTagBytes, cipherText) = Cipher.aeadSimpleEncrypt aeadGcmCipher BS.empty paddedPlainText 16
+      authTag = ByteArray.convert $ Cipher.unAuthTag authTagBytes
       encryptedMessage = cipherText <> authTag
       -- HMAC a doesn't have Show instance needed for test suite
       -- so we extract the bytes and store that in WebPushEncryptionOutput
